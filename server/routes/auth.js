@@ -154,33 +154,33 @@ router.get('/twitter/callback', async (req, res) => {
     const client = new TwitterApi({
       appKey: process.env.TWITTER_API_KEY,
       appSecret: process.env.TWITTER_API_SECRET,
-      accessToken: oauth_token as string,
+      accessToken: oauth_token,
       accessSecret: oauth_token_secret
     });
 
     console.log('Attempting Twitter login...');
-    const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier as string);
-    console.log('Twitter login successful:', screenName);
+    const loginResult = await client.login(oauth_verifier);
+    console.log('Twitter login successful:', loginResult.screenName);
 
     let user = await User.findById(req.session.userId);
     if (!user) {
-      console.log('Creating new user for:', screenName);
+      console.log('Creating new user for:', loginResult.screenName);
       user = new User({
-        email: `${screenName}@twitter.com`,
+        email: `${loginResult.screenName}@twitter.com`,
         socialAccounts: {
           twitter: {
-            accessToken,
-            accessSecret,
-            username: screenName
+            accessToken: loginResult.accessToken,
+            accessSecret: loginResult.accessSecret,
+            username: loginResult.screenName
           }
         }
       });
     } else {
       console.log('Updating existing user:', user.email);
       user.socialAccounts.twitter = {
-        accessToken,
-        accessSecret,
-        username: screenName
+        accessToken: loginResult.accessToken,
+        accessSecret: loginResult.accessSecret,
+        username: loginResult.screenName
       };
     }
 
