@@ -37,6 +37,15 @@ const startServer = async () => {
       }
     });
 
+    // CORS configuration - MUST come before session middleware
+    app.use(cors({
+      origin: process.env.FRONTEND_URL,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+      exposedHeaders: ['Set-Cookie']
+    }));
+
     // Session middleware configuration
     app.use(session({
       secret: process.env.SESSION_SECRET,
@@ -46,22 +55,13 @@ const startServer = async () => {
       store: sessionStore,
       proxy: true,
       cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: true, // Always use secure cookies
         httpOnly: true,
-        sameSite: 'none',
+        sameSite: 'none', // Required for cross-site cookies
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
         path: '/',
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
+        domain: '.onrender.com' // Allow cookies across subdomains
       }
-    }));
-
-    // CORS configuration - MUST come after session middleware
-    app.use(cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      exposedHeaders: ['Set-Cookie']
     }));
 
     // Debug middleware for development
@@ -90,7 +90,8 @@ const startServer = async () => {
         env: process.env.NODE_ENV,
         session: {
           id: req.sessionID,
-          active: !!req.session
+          active: !!req.session,
+          cookie: req.session.cookie
         }
       });
     });
