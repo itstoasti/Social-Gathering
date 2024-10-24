@@ -4,7 +4,7 @@ import SocialLogin from './components/SocialLogin';
 import PostEditor from './components/PostEditor';
 import PostScheduler from './components/PostScheduler';
 import { posts } from './services/api';
-import { compressImage } from './utils/imageCompression';
+import { compressImage } from './utils/imageCompression.ts'; // Fix import path
 
 function App() {
   const [caption, setCaption] = useState('');
