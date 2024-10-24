@@ -78,20 +78,10 @@ router.get('/accounts', async (req, res) => {
 
 // Check auth status
 router.get('/status', (req, res) => {
-  const status = {
+  res.json({
     authenticated: !!req.session.userId,
-    sessionId: req.sessionID,
-    hasSession: !!req.session,
-    sessionData: { ...req.session }
-  };
-
-  // Remove sensitive data
-  if (status.sessionData.oauth_token_secret) {
-    status.sessionData.oauth_token_secret = '[REDACTED]';
-  }
-
-  console.log('Auth status:', status);
-  res.json(status);
+    sessionId: req.sessionID
+  });
 });
 
 // Twitter OAuth
@@ -104,12 +94,12 @@ router.get('/twitter', async (req, res) => {
     });
 
     const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(
-      `${process.env.BASE_URL}/api/auth/twitter/callback`
+      `${process.env.BASE_URL || 'http://localhost:5000'}/api/auth/twitter/callback`
     );
 
     // Store OAuth tokens in session
-    req.session.oauth_token_secret = oauth_token_secret;
     req.session.oauth_token = oauth_token;
+    req.session.oauth_token_secret = oauth_token_secret;
     
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
@@ -201,10 +191,10 @@ router.get('/twitter/callback', async (req, res) => {
     });
 
     console.log('Redirecting to frontend...');
-    res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
+    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?auth=success`);
   } catch (error) {
     console.error('Twitter callback error:', error);
-    res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
+    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?auth=error&message=${encodeURIComponent(error.message)}`);
   }
 });
 
