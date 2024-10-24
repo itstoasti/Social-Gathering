@@ -31,44 +31,49 @@ const startServer = async () => {
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
-      touchAfter: 24 * 3600
+      touchAfter: 24 * 3600,
+      crypto: {
+        secret: process.env.SESSION_SECRET
+      }
     });
 
-    // Session middleware configuration - MUST come before CORS
+    // Session middleware configuration
     app.use(session({
       secret: process.env.SESSION_SECRET,
       name: 'social.sid',
       resave: false,
       saveUninitialized: false,
       store: sessionStore,
-      proxy: true, // Important for secure cookies behind proxy
+      proxy: true,
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        sameSite: 'none',
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        path: '/',
         domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
       }
     }));
 
     // CORS configuration - MUST come after session middleware
     app.use(cors({
-      origin: process.env.NODE_ENV === 'production' 
-        ? process.env.FRONTEND_URL 
-        : 'http://localhost:5173',
+      origin: process.env.FRONTEND_URL,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
-      exposedHeaders: ['set-cookie']
+      exposedHeaders: ['Set-Cookie']
     }));
 
     // Debug middleware for development
-    if (process.env.NODE_ENV === 'development') {
+    if (process.env.NODE_ENV !== 'production') {
       app.use((req, res, next) => {
         console.log('Session:', {
           id: req.sessionID,
           cookie: req.session.cookie,
-          oauth: !!req.session.oauthTokens
+          oauth: {
+            token: !!req.session.oauth_token,
+            secret: !!req.session.oauth_token_secret
+          }
         });
         next();
       });
@@ -83,7 +88,10 @@ const startServer = async () => {
       res.status(200).json({ 
         status: 'ok',
         env: process.env.NODE_ENV,
-        session: !!req.session
+        session: {
+          id: req.sessionID,
+          active: !!req.session
+        }
       });
     });
 
@@ -99,6 +107,7 @@ const startServer = async () => {
     // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+      console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
