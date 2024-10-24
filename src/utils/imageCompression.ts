@@ -10,9 +10,15 @@ export class ImageCompressionError extends ApiError {
 export const compressImage = async (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
     try {
-      const img = new window.Image();
+      // Validate file
+      if (!file || !(file instanceof File)) {
+        throw new ImageCompressionError('Invalid file object');
+      }
+
+      // Create object URL
       const objectUrl = URL.createObjectURL(file);
-      
+      const img = new Image();
+
       img.onload = () => {
         try {
           // Create canvas
