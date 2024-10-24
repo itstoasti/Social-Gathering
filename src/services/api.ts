@@ -2,10 +2,8 @@ import axios, { AxiosError } from 'axios';
 
 const TIMEOUT = 10000; // 10 seconds timeout
 
-// Get the base URL from environment
-const baseURL = import.meta.env.DEV 
-  ? 'http://localhost:5000/api'  // Development
-  : '/api';                      // Production
+// Always use production URL
+const baseURL = 'https://social-gathering.onrender.com/api';
 
 const api = axios.create({
   baseURL,
