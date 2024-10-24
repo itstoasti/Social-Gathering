@@ -24,69 +24,6 @@ const asyncHandler = (fn) => (req, res, next) => {
   });
 };
 
-// Debug endpoint
-router.get('/debug-session', (req, res) => {
-  console.log('Session debug:', {
-    id: req.sessionID,
-    oauth_token: req.session.oauth_token,
-    oauth_token_secret: '***hidden***',
-    userId: req.session.userId
-  });
-  
-  res.json({
-    sessionId: req.sessionID,
-    hasOAuthTokens: !!(req.session.oauth_token && req.session.oauth_token_secret),
-    userId: req.session.userId
-  });
-});
-
-// Check auth status
-router.get('/status', asyncHandler(async (req, res) => {
-  res.json({
-    authenticated: !!req.session.userId,
-    sessionId: req.sessionID
-  });
-}));
-
-// Get connected accounts status
-router.get('/accounts', asyncHandler(async (req, res) => {
-  const userId = req.session.userId;
-  
-  if (!userId) {
-    return res.json({
-      twitter: { connected: false },
-      instagram: { connected: false },
-      facebook: { connected: false }
-    });
-  }
-
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.json({
-      twitter: { connected: false },
-      instagram: { connected: false },
-      facebook: { connected: false }
-    });
-  }
-
-  const accounts = {
-    twitter: {
-      connected: !!user.socialAccounts?.twitter?.accessToken,
-      username: user.socialAccounts?.twitter?.username
-    },
-    instagram: {
-      connected: !!user.socialAccounts?.instagram?.accessToken,
-      username: user.socialAccounts?.instagram?.username
-    },
-    facebook: {
-      connected: !!user.socialAccounts?.facebook?.accessToken,
-      pageName: user.socialAccounts?.facebook?.pageName
-    }
-  };
-
-  res.json(accounts);
-}));
-
 // Twitter OAuth
 router.get('/twitter', asyncHandler(async (req, res) => {
   if (!process.env.TWITTER_API_KEY || !process.env.TWITTER_API_SECRET) {
@@ -107,14 +44,18 @@ router.get('/twitter', asyncHandler(async (req, res) => {
   req.session.oauth_token = oauth_token;
   req.session.oauth_token_secret = oauth_token_secret;
   
-  // Save session before redirecting
+  // Force session save before continuing
   await new Promise((resolve, reject) => {
     req.session.save((err) => {
       if (err) {
         console.error('Failed to save session:', err);
         reject(err);
       } else {
-        console.log('Session saved with tokens');
+        console.log('Session saved successfully:', {
+          sessionID: req.sessionID,
+          hasToken: !!req.session.oauth_token,
+          hasSecret: !!req.session.oauth_token_secret
+        });
         resolve();
       }
     });
@@ -209,6 +150,69 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
     const errorMessage = encodeURIComponent(error.message || 'Authentication failed');
     res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${errorMessage}`);
   }
+}));
+
+// Debug endpoint
+router.get('/debug-session', (req, res) => {
+  console.log('Session debug:', {
+    id: req.sessionID,
+    oauth_token: req.session.oauth_token,
+    oauth_token_secret: '***hidden***',
+    userId: req.session.userId
+  });
+  
+  res.json({
+    sessionId: req.sessionID,
+    hasOAuthTokens: !!(req.session.oauth_token && req.session.oauth_token_secret),
+    userId: req.session.userId
+  });
+});
+
+// Check auth status
+router.get('/status', asyncHandler(async (req, res) => {
+  res.json({
+    authenticated: !!req.session.userId,
+    sessionId: req.sessionID
+  });
+}));
+
+// Get connected accounts status
+router.get('/accounts', asyncHandler(async (req, res) => {
+  const userId = req.session.userId;
+  
+  if (!userId) {
+    return res.json({
+      twitter: { connected: false },
+      instagram: { connected: false },
+      facebook: { connected: false }
+    });
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.json({
+      twitter: { connected: false },
+      instagram: { connected: false },
+      facebook: { connected: false }
+    });
+  }
+
+  const accounts = {
+    twitter: {
+      connected: !!user.socialAccounts?.twitter?.accessToken,
+      username: user.socialAccounts?.twitter?.username
+    },
+    instagram: {
+      connected: !!user.socialAccounts?.instagram?.accessToken,
+      username: user.socialAccounts?.instagram?.username
+    },
+    facebook: {
+      connected: !!user.socialAccounts?.facebook?.accessToken,
+      pageName: user.socialAccounts?.facebook?.pageName
+    }
+  };
+
+  res.json(accounts);
 }));
 
 export default router;
