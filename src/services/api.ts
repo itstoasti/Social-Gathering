@@ -5,6 +5,18 @@ const TIMEOUT = 10000; // 10 seconds timeout
 // Always use production URL
 const baseURL = 'https://social-gathering.onrender.com/api';
 
+export class ApiError extends Error {
+  status?: number;
+  details?: unknown;
+
+  constructor(message: string, status?: number, details?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.details = details;
+  }
+}
+
 const api = axios.create({
   baseURL,
   withCredentials: true,
@@ -24,12 +36,6 @@ export interface ConnectedAccounts {
   twitter: ConnectedAccount;
   instagram: ConnectedAccount;
   facebook: ConnectedAccount;
-}
-
-export interface ApiError {
-  message: string;
-  status?: number;
-  details?: unknown;
 }
 
 // Add request interceptor for debugging
@@ -61,15 +67,13 @@ api.interceptors.response.use(
     return response;
   },
   (error: AxiosError) => {
-    const apiError: ApiError = {
-      message: 'An unexpected error occurred',
-      status: error.response?.status
-    };
+    const apiError = new ApiError(
+      error.response?.data?.message || error.message || 'An unexpected error occurred',
+      error.response?.status,
+      error.response?.data
+    );
 
-    if (error.response) {
-      apiError.message = error.response.data?.message || error.message;
-      apiError.details = error.response.data;
-    } else if (error.request) {
+    if (!error.response && error.request) {
       if (error.code === 'ECONNABORTED') {
         apiError.message = 'Request timed out. Please try again.';
       } else {
