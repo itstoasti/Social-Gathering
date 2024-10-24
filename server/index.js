@@ -23,7 +23,36 @@ const startServer = async () => {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
-    // CORS configuration
+    // Session store setup
+    const sessionStore = MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI,
+      ttl: 24 * 60 * 60,
+      touchAfter: 24 * 3600,
+      crypto: {
+        secret: process.env.SESSION_SECRET
+      }
+    });
+
+    // Session configuration - MUST come before CORS
+    app.use(session({
+      secret: process.env.SESSION_SECRET || 'dev-secret-key',
+      resave: true, // Changed to true to ensure session is saved
+      saveUninitialized: true, // Changed to true to ensure new sessions are saved
+      store: sessionStore,
+      cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000,
+        httpOnly: true,
+        domain: process.env.NODE_ENV === 'production' 
+          ? '.onrender.com'  // Allow sharing between subdomains
+          : undefined
+      },
+      name: 'social.sid',
+      rolling: true // Refresh cookie on each request
+    }));
+
+    // CORS configuration - MUST come after session middleware
     app.use(cors({
       origin: process.env.NODE_ENV === 'production'
         ? process.env.FRONTEND_URL
@@ -34,31 +63,11 @@ const startServer = async () => {
       exposedHeaders: ['set-cookie']
     }));
 
-    // Session store setup
-    const sessionStore = MongoStore.create({
-      mongoUrl: process.env.MONGODB_URI,
-      ttl: 24 * 60 * 60,
-      touchAfter: 24 * 3600
-    });
-
-    // Session configuration
-    app.use(session({
-      secret: process.env.SESSION_SECRET || 'dev-secret-key',
-      resave: false,
-      saveUninitialized: false,
-      store: sessionStore,
-      cookie: {
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000,
-        httpOnly: true
-      },
-      name: 'social.sid'
-    }));
-
-    // Request logging middleware
+    // Session debugging middleware
     app.use((req, res, next) => {
       console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+      console.log('Session ID:', req.sessionID);
+      console.log('Session Data:', req.session);
       next();
     });
 
@@ -71,7 +80,8 @@ const startServer = async () => {
       res.status(200).json({ 
         status: 'ok',
         timestamp: new Date().toISOString(),
-        env: process.env.NODE_ENV
+        env: process.env.NODE_ENV,
+        sessionID: req.sessionID
       });
     });
 
