@@ -5,6 +5,52 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
+// Get connected accounts status
+router.get('/accounts', async (req, res) => {
+  try {
+    const userId = req.session.userId;
+    if (!userId) {
+      return res.json({
+        twitter: { connected: false },
+        instagram: { connected: false },
+        facebook: { connected: false }
+      });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.json({
+        twitter: { connected: false },
+        instagram: { connected: false },
+        facebook: { connected: false }
+      });
+    }
+
+    return res.json({
+      twitter: {
+        connected: !!user.socialAccounts?.twitter?.accessToken,
+        username: user.socialAccounts?.twitter?.username
+      },
+      instagram: {
+        connected: !!user.socialAccounts?.instagram?.accessToken,
+        username: user.socialAccounts?.instagram?.username
+      },
+      facebook: {
+        connected: !!user.socialAccounts?.facebook?.accessToken,
+        pageName: user.socialAccounts?.facebook?.pageName
+      }
+    });
+  } catch (error) {
+    console.error('Get accounts status error:', error);
+    res.status(500).json({ message: 'Failed to get accounts status' });
+  }
+});
+
+// Check auth status
+router.get('/status', (req, res) => {
+  res.json({ authenticated: !!req.session.userId });
+});
+
 // Twitter OAuth
 router.get('/twitter', async (req, res) => {
   try {
@@ -17,17 +63,15 @@ router.get('/twitter', async (req, res) => {
       `${process.env.BASE_URL}/api/auth/twitter/callback`
     );
 
-    // Store the oauth_token_secret in session for verification during callback
     req.session.oauth_token_secret = oauth_token_secret;
-    
     res.json({ url });
   } catch (error) {
     console.error('Twitter auth error:', error);
-    res.status(500).json({ message: 'Authentication failed', error: error.message });
+    res.status(500).json({ message: 'Authentication failed' });
   }
 });
 
-// Twitter OAuth Callback
+// Twitter OAuth callback
 router.get('/twitter/callback', async (req, res) => {
   try {
     const { oauth_token, oauth_verifier } = req.query;
@@ -41,85 +85,38 @@ router.get('/twitter/callback', async (req, res) => {
       appKey: process.env.TWITTER_API_KEY,
       appSecret: process.env.TWITTER_API_SECRET,
       accessToken: oauth_token,
-      accessSecret: oauth_token_secret,
+      accessSecret: oauth_token_secret
     });
 
-    const {
-      client: loggedClient,
-      accessToken,
-      accessSecret,
-    } = await client.login(oauth_verifier);
+    const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
 
-    // Get user info
-    const user = await loggedClient.v2.me();
-
-    // Find or create user in database
-    let dbUser = await User.findOne({ 'socialAccounts.twitter.username': user.data.username });
-    
-    if (!dbUser) {
-      dbUser = new User({
-        email: `${user.data.username}@twitter.com`, // Temporary email
+    let user = await User.findById(req.session.userId);
+    if (!user) {
+      user = new User({
+        email: `${screenName}@twitter.com`,
         socialAccounts: {
           twitter: {
-            username: user.data.username,
             accessToken,
-            accessSecret
+            accessSecret,
+            username: screenName
           }
         }
       });
     } else {
-      dbUser.socialAccounts.twitter = {
-        username: user.data.username,
+      user.socialAccounts.twitter = {
         accessToken,
-        accessSecret
+        accessSecret,
+        username: screenName
       };
     }
 
-    await dbUser.save();
-    req.session.userId = dbUser._id;
+    await user.save();
+    req.session.userId = user._id;
 
-    // Redirect back to frontend
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error('Twitter callback error:', error);
-    res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
-  }
-});
-
-// Get connected accounts
-router.get('/accounts', async (req, res) => {
-  try {
-    if (!req.session.userId) {
-      return res.json({
-        twitter: null,
-        instagram: null,
-        facebook: null
-      });
-    }
-
-    const user = await User.findById(req.session.userId);
-    if (!user) {
-      return res.json({
-        twitter: null,
-        instagram: null,
-        facebook: null
-      });
-    }
-
-    res.json({
-      twitter: user.socialAccounts.twitter ? {
-        username: user.socialAccounts.twitter.username
-      } : null,
-      instagram: user.socialAccounts.instagram ? {
-        username: user.socialAccounts.instagram.username
-      } : null,
-      facebook: user.socialAccounts.facebook ? {
-        pageName: user.socialAccounts.facebook.pageName
-      } : null
-    });
-  } catch (error) {
-    console.error('Get accounts error:', error);
-    res.status(500).json({ message: 'Failed to fetch connected accounts' });
+    res.redirect(`${process.env.FRONTEND_URL}?auth=error`);
   }
 });
 
