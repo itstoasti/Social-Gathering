@@ -1,11 +1,7 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.PROD 
-  ? 'https://social-gathering.onrender.com/api'
-  : '/api';
-
 const api = axios.create({
-  baseURL,
+  baseURL: '/api',
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
@@ -35,7 +31,7 @@ api.interceptors.response.use(
         message: error.message
       });
     } else {
-      console.error('API Error:', error.message);
+      console.error('Network Error:', error.message);
     }
     return Promise.reject(error);
   }
