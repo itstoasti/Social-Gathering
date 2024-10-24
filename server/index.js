@@ -26,30 +26,33 @@ const startServer = async () => {
       app.set('trust proxy', 1);
     }
 
-    // Session store setup
+    // Session store setup with more aggressive settings
     const sessionStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
-      touchAfter: 24 * 3600,
+      touchAfter: 0, // Update on every request
       crypto: {
         secret: process.env.SESSION_SECRET
-      }
+      },
+      stringify: false // Store as native MongoDB data types
     });
 
-    // Session middleware configuration
+    // Session middleware with updated configuration
     app.use(session({
       secret: process.env.SESSION_SECRET,
       name: 'social.sid',
-      resave: true, // Changed to true to ensure session is saved
-      saveUninitialized: true, // Changed to true to maintain session
+      resave: true,
+      saveUninitialized: true,
       store: sessionStore,
+      rolling: true, // Reset expiration on every response
       proxy: true,
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        path: '/',
         domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
       }
     }));
