@@ -21,6 +21,12 @@ function App() {
   const [error, setError] = useState<string | null>(null);
 
   const handleMediaSelect = (file: File) => {
+    // Check file size (10MB limit)
+    if (file.size > 10 * 1024 * 1024) {
+      setError('File size must be less than 10MB');
+      return;
+    }
+
     setMediaFile(file);
     const reader = new FileReader();
     reader.onloadend = () => {
@@ -55,8 +61,18 @@ function App() {
       let mediaUrl = null;
       if (mediaFile) {
         // In a real app, you would upload the file to a storage service
-        // and get back a URL. For now, we'll use the data URL
-        mediaUrl = mediaPreview;
+        // For now, we'll use a compressed version of the data URL
+        if (mediaType === 'image') {
+          // Compress image before sending
+          const compressedImage = await compressImage(mediaFile);
+          const reader = new FileReader();
+          mediaUrl = await new Promise((resolve) => {
+            reader.onloadend = () => resolve(reader.result as string);
+            reader.readAsDataURL(compressedImage);
+          });
+        } else {
+          mediaUrl = mediaPreview;
+        }
       }
 
       const postData = {
@@ -86,6 +102,49 @@ function App() {
     } finally {
       setIsPosting(false);
     }
+  };
+
+  // Image compression function
+  const compressImage = async (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d')!;
+
+        // Calculate new dimensions while maintaining aspect ratio
+        let width = img.width;
+        let height = img.height;
+        const maxDimension = 1200;
+
+        if (width > height && width > maxDimension) {
+          height = (height * maxDimension) / width;
+          width = maxDimension;
+        } else if (height > maxDimension) {
+          width = (width * maxDimension) / height;
+          height = maxDimension;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        // Draw and compress
+        ctx.drawImage(img, 0, 0, width, height);
+        canvas.toBlob(
+          (blob) => {
+            if (blob) {
+              resolve(blob);
+            } else {
+              reject(new Error('Failed to compress image'));
+            }
+          },
+          'image/jpeg',
+          0.8
+        );
+      };
+      img.onerror = () => reject(new Error('Failed to load image'));
+    });
   };
 
   return (
