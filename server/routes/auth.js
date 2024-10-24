@@ -42,20 +42,24 @@ router.get('/twitter', asyncHandler(async (req, res) => {
   req.session.oauth_token = oauth_token;
   req.session.oauth_token_secret = oauth_token_secret;
 
-  // Save session synchronously
-  req.session.save((err) => {
-    if (err) {
-      console.error('Failed to save session:', err);
-      res.status(500).json({ message: 'Failed to initialize authentication' });
-    } else {
-      console.log('Session saved successfully:', {
-        id: req.sessionID,
-        hasToken: !!oauth_token,
-        hasSecret: !!oauth_token_secret
-      });
-      res.json({ url });
-    }
+  // Force session save and wait for completion
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) {
+        console.error('Failed to save session:', err);
+        reject(new Error('Failed to initialize authentication'));
+      } else {
+        console.log('Session saved successfully:', {
+          id: req.sessionID,
+          hasToken: !!oauth_token,
+          hasSecret: !!oauth_token_secret
+        });
+        resolve();
+      }
+    });
   });
+
+  res.json({ url });
 }));
 
 // Twitter OAuth callback
@@ -126,21 +130,24 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
-    // Save session before redirect
-    req.session.save((err) => {
-      if (err) {
-        console.error('Failed to save session:', err);
-        throw new Error('Failed to save authentication state');
-      }
-      
-      console.log('Final session state:', {
-        id: req.sessionID,
-        userId: req.session.userId,
-        cookie: req.session.cookie
+    // Force session save and wait for completion
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error('Failed to save session:', err);
+          reject(new Error('Failed to save authentication state'));
+        } else {
+          console.log('Final session state:', {
+            id: req.sessionID,
+            userId: req.session.userId,
+            cookie: req.session.cookie
+          });
+          resolve();
+        }
       });
-      
-      res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
     });
+
+    res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error('Twitter login error:', error);
     throw error;
