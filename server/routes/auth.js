@@ -36,32 +36,26 @@ router.get('/twitter', asyncHandler(async (req, res) => {
   const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
   console.log('Generating Twitter auth URL with callback:', callbackUrl);
 
-  const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl, {
-    linkMode: 'authorize'
-  });
+  const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
 
   // Store tokens in session
   req.session.oauth_token = oauth_token;
   req.session.oauth_token_secret = oauth_token_secret;
 
-  // Force session save before redirect
-  await new Promise((resolve, reject) => {
-    req.session.save((err) => {
-      if (err) {
-        console.error('Failed to save session:', err);
-        reject(err);
-      } else {
-        console.log('Session saved with OAuth tokens:', {
-          id: req.sessionID,
-          hasToken: !!oauth_token,
-          hasSecret: !!oauth_token_secret
-        });
-        resolve();
-      }
-    });
+  // Save session synchronously
+  req.session.save((err) => {
+    if (err) {
+      console.error('Failed to save session:', err);
+      res.status(500).json({ message: 'Failed to initialize authentication' });
+    } else {
+      console.log('Session saved successfully:', {
+        id: req.sessionID,
+        hasToken: !!oauth_token,
+        hasSecret: !!oauth_token_secret
+      });
+      res.json({ url });
+    }
   });
-
-  res.json({ url });
 }));
 
 // Twitter OAuth callback
@@ -73,11 +67,16 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
     hasQueryToken: !!oauth_token,
     hasQueryVerifier: !!oauth_verifier,
     hasSessionSecret: !!oauth_token_secret,
-    sessionID: req.sessionID
+    sessionID: req.sessionID,
+    session: req.session
   });
 
-  if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
-    throw new Error('Missing OAuth tokens');
+  if (!oauth_token || !oauth_verifier) {
+    throw new Error('Missing OAuth tokens from Twitter');
+  }
+
+  if (!oauth_token_secret) {
+    throw new Error('Missing OAuth token secret in session');
   }
 
   // Verify tokens match
@@ -85,14 +84,14 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
     throw new Error('OAuth token mismatch');
   }
 
-  try {
-    const client = new TwitterApi({
-      appKey: process.env.TWITTER_API_KEY,
-      appSecret: process.env.TWITTER_API_SECRET,
-      accessToken: oauth_token,
-      accessSecret: oauth_token_secret
-    });
+  const client = new TwitterApi({
+    appKey: process.env.TWITTER_API_KEY,
+    appSecret: process.env.TWITTER_API_SECRET,
+    accessToken: oauth_token,
+    accessSecret: oauth_token_secret
+  });
 
+  try {
     const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
     console.log('Twitter login successful:', { screenName });
 
@@ -122,26 +121,26 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
 
     // Update session
     req.session.userId = user._id;
+    
+    // Clear OAuth tokens
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
     // Save session before redirect
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('Failed to save session:', err);
-          reject(err);
-        } else {
-          console.log('Session saved with user:', {
-            id: req.sessionID,
-            userId: req.session.userId
-          });
-          resolve();
-        }
+    req.session.save((err) => {
+      if (err) {
+        console.error('Failed to save session:', err);
+        throw new Error('Failed to save authentication state');
+      }
+      
+      console.log('Final session state:', {
+        id: req.sessionID,
+        userId: req.session.userId,
+        cookie: req.session.cookie
       });
+      
+      res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
     });
-
-    res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error('Twitter login error:', error);
     throw error;
