@@ -19,22 +19,21 @@ router.get('/twitter', async (req, res) => {
     req.session.oauth_token = oauth_token;
     req.session.oauth_token_secret = oauth_token_secret;
 
-    // Force session save
+    // Force session save before redirect
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           reject(err);
         } else {
+          console.log('Session saved successfully:', {
+            sessionId: req.sessionID,
+            hasToken: !!req.session.oauth_token,
+            hasSecret: !!req.session.oauth_token_secret
+          });
           resolve();
         }
       });
-    });
-
-    console.log('OAuth tokens stored:', {
-      sessionId: req.sessionID,
-      hasToken: !!req.session.oauth_token,
-      hasSecret: !!req.session.oauth_token_secret
     });
 
     res.json({ url });
@@ -54,7 +53,8 @@ router.get('/twitter/callback', async (req, res) => {
       sessionId: req.sessionID,
       hasQueryToken: !!oauth_token,
       hasQueryVerifier: !!oauth_verifier,
-      hasSessionSecret: !!oauth_token_secret
+      hasSessionSecret: !!oauth_token_secret,
+      session: req.session
     });
 
     if (!oauth_token || !oauth_verifier) {
@@ -93,23 +93,34 @@ router.get('/twitter/callback', async (req, res) => {
 
     await user.save();
 
-    // Update session
+    // Update session with user ID
     req.session.userId = user._id;
 
     // Clear OAuth tokens
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
-    // Force session save
+    // Force session save before redirect
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           reject(err);
         } else {
+          console.log('Session saved successfully:', {
+            sessionId: req.sessionID,
+            userId: req.session.userId
+          });
           resolve();
         }
       });
+    });
+
+    // Set additional headers for session persistence
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     });
 
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
