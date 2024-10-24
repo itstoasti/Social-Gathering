@@ -18,13 +18,24 @@ const startServer = async () => {
     await connectDB();
 
     // Basic middleware
-    app.use(express.json());
-    app.use(express.urlencoded({ extended: true }));
+    app.use(express.json({ limit: '50mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
     // Trust proxy for secure cookies in production
     if (process.env.NODE_ENV === 'production') {
       app.set('trust proxy', 1);
     }
+
+    // CORS configuration - MUST come before other middleware
+    app.use(cors({
+      origin: process.env.NODE_ENV === 'production'
+        ? [process.env.FRONTEND_URL]
+        : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+      exposedHeaders: ['Set-Cookie']
+    }));
 
     // Session store setup
     const sessionStore = MongoStore.create({
@@ -53,16 +64,14 @@ const startServer = async () => {
       }
     }));
 
-    // CORS configuration
-    app.use(cors({
-      origin: process.env.NODE_ENV === 'production'
-        ? process.env.FRONTEND_URL
-        : ['http://localhost:5173', 'http://127.0.0.1:5173'],
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-      exposedHeaders: ['Set-Cookie']
-    }));
+    // Add headers middleware
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Origin', process.env.NODE_ENV === 'production' 
+        ? process.env.FRONTEND_URL 
+        : 'http://localhost:5173');
+      next();
+    });
 
     // Session debugging middleware
     app.use((req, res, next) => {
