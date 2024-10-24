@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Instagram, Facebook } from 'lucide-react';
+import { X, Instagram, Facebook, AlertCircle } from 'lucide-react';
 import { auth, type ConnectedAccounts, type ApiError } from '../services/api';
 
 const initialAccounts: ConnectedAccounts = {
@@ -34,7 +34,10 @@ function SocialLogin() {
 
       if (authStatus === 'success') {
         await fetchConnectedAccounts();
+        // Clear URL parameters
         window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (authStatus === 'error') {
+        setError('Authentication failed. Please try again.');
       } else {
         await fetchConnectedAccounts();
       }
@@ -45,13 +48,19 @@ function SocialLogin() {
 
   const fetchConnectedAccounts = async () => {
     try {
+      // First check auth status
       const authStatus = await auth.checkAuthStatus();
+      console.log('Auth status:', authStatus);
+
       if (!authStatus.authenticated) {
         setAccounts(initialAccounts);
         return;
       }
 
+      // Then get connected accounts
       const connectedAccounts = await auth.getConnectedAccounts();
+      console.log('Connected accounts:', connectedAccounts);
+      
       setAccounts(connectedAccounts);
       setError(null);
     } catch (err) {
@@ -65,8 +74,11 @@ function SocialLogin() {
       setLoading(prev => ({ ...prev, twitter: true }));
       setError(null);
       
+      console.log('Requesting Twitter auth URL...');
       const { url } = await auth.getTwitterAuthUrl();
+      
       if (url) {
+        console.log('Redirecting to Twitter auth URL:', url);
         window.location.href = url;
       } else {
         throw new Error('No authorization URL received');
@@ -83,7 +95,6 @@ function SocialLogin() {
     const errorMessage = apiError.message || fallbackMessage;
     setError(errorMessage);
     
-    // Log error details without using Symbol or non-cloneable objects
     console.error('Error details:', {
       message: errorMessage,
       status: apiError.status,
@@ -94,11 +105,17 @@ function SocialLogin() {
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
       <h2 className="text-xl font-semibold mb-4">Connected Accounts</h2>
+      
       {error && (
-        <div className="mb-4 p-3 bg-red-50 text-red-700 rounded-lg">
-          {error}
+        <div className="mb-4 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-medium">Authentication Error</p>
+            <p className="text-sm mt-1">{error}</p>
+          </div>
         </div>
       )}
+
       <div className="space-y-4">
         <button
           onClick={handleTwitterLogin}
@@ -109,11 +126,19 @@ function SocialLogin() {
             <X className="w-5 h-5" />
             <span>X.com</span>
           </div>
-          <span className={accounts.twitter.connected ? 'text-green-500' : 'text-red-500'}>
-            {loading.twitter ? 'Connecting...' : 
-             accounts.twitter.connected ? 
-             `@${accounts.twitter.username}` : 
-             'Not Connected'}
+          <span className={`flex items-center gap-2 ${
+            accounts.twitter.connected ? 'text-green-500' : 'text-red-500'
+          }`}>
+            {loading.twitter ? (
+              <>
+                <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent" />
+                Connecting...
+              </>
+            ) : accounts.twitter.connected ? (
+              `@${accounts.twitter.username}`
+            ) : (
+              'Not Connected'
+            )}
           </span>
         </button>
         
