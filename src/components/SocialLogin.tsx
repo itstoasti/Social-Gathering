@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Instagram, Facebook } from 'lucide-react';
-import { auth, type ConnectedAccounts } from '../services/api';
+import { auth, type ConnectedAccounts, type ApiError } from '../services/api';
 
 const initialAccounts: ConnectedAccounts = {
   twitter: { connected: false },
@@ -16,64 +16,46 @@ function SocialLogin() {
   });
   const [accounts, setAccounts] = useState<ConnectedAccounts>(initialAccounts);
   const [error, setError] = useState<string | null>(null);
-  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const urlParams = new URLSearchParams(window.location.search);
-        const authStatus = urlParams.get('auth');
-        const authError = urlParams.get('message');
-
-        if (authError) {
-          setError(`Authentication error: ${decodeURIComponent(authError)}`);
-          return;
-        }
-
-        if (authStatus === 'success') {
-          console.log('Auth callback detected, fetching accounts...');
-          await fetchConnectedAccounts();
-          // Clear URL parameters
-          window.history.replaceState({}, document.title, window.location.pathname);
-        } else {
-          console.log('No auth callback, checking current status...');
-          await fetchConnectedAccounts();
-        }
-      } catch (err) {
-        console.error('Auth check failed:', err);
-        setError('Failed to check authentication status');
-      }
-    };
-
     checkAuth();
   }, []);
 
-  const fetchConnectedAccounts = async () => {
+  const checkAuth = async () => {
     try {
-      console.log('Fetching connected accounts...');
-      
-      // First check auth status
-      const authStatus = await auth.checkAuthStatus();
-      console.log('Auth status:', authStatus.data);
-      
-      // Get debug session info
-      try {
-        const debugResponse = await auth.debugSession();
-        console.log('Debug session data:', debugResponse.data);
-        setDebugInfo(debugResponse.data);
-      } catch (debugErr) {
-        console.warn('Debug session fetch failed:', debugErr);
+      const urlParams = new URLSearchParams(window.location.search);
+      const authStatus = urlParams.get('auth');
+      const authError = urlParams.get('message');
+
+      if (authError) {
+        setError(`Authentication error: ${decodeURIComponent(authError)}`);
+        return;
       }
 
-      // Get connected accounts
-      const { data } = await auth.getConnectedAccounts();
-      console.log('Connected accounts:', data);
-      
-      setAccounts(data);
+      if (authStatus === 'success') {
+        await fetchConnectedAccounts();
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else {
+        await fetchConnectedAccounts();
+      }
+    } catch (err) {
+      handleError(err, 'Failed to check authentication status');
+    }
+  };
+
+  const fetchConnectedAccounts = async () => {
+    try {
+      const authStatus = await auth.checkAuthStatus();
+      if (!authStatus.authenticated) {
+        setAccounts(initialAccounts);
+        return;
+      }
+
+      const connectedAccounts = await auth.getConnectedAccounts();
+      setAccounts(connectedAccounts);
       setError(null);
-    } catch (err: any) {
-      console.error('Failed to fetch connected accounts:', err);
-      setError(err.response?.data?.message || 'Failed to fetch connected accounts');
+    } catch (err) {
+      handleError(err, 'Failed to fetch connected accounts');
       setAccounts(initialAccounts);
     }
   };
@@ -83,21 +65,30 @@ function SocialLogin() {
       setLoading(prev => ({ ...prev, twitter: true }));
       setError(null);
       
-      console.log('Requesting Twitter auth URL...');
-      const { data } = await auth.getTwitterAuthUrl();
-      
-      if (data?.url) {
-        console.log('Redirecting to Twitter auth URL:', data.url);
-        window.location.href = data.url;
+      const { url } = await auth.getTwitterAuthUrl();
+      if (url) {
+        window.location.href = url;
       } else {
-        throw new Error('No auth URL received');
+        throw new Error('No authorization URL received');
       }
-    } catch (err: any) {
-      console.error('Failed to get Twitter auth URL:', err);
-      setError(err.response?.data?.message || 'Failed to connect to Twitter');
+    } catch (err) {
+      handleError(err, 'Failed to connect to Twitter');
     } finally {
       setLoading(prev => ({ ...prev, twitter: false }));
     }
+  };
+
+  const handleError = (err: unknown, fallbackMessage: string) => {
+    const apiError = err as ApiError;
+    const errorMessage = apiError.message || fallbackMessage;
+    setError(errorMessage);
+    
+    // Log error details without using Symbol or non-cloneable objects
+    console.error('Error details:', {
+      message: errorMessage,
+      status: apiError.status,
+      details: apiError.details
+    });
   };
 
   return (
@@ -148,15 +139,6 @@ function SocialLogin() {
           <span className="text-gray-500">Coming Soon</span>
         </button>
       </div>
-
-      {debugInfo && (
-        <div className="mt-6 p-4 bg-gray-50 rounded-lg text-sm">
-          <h3 className="font-semibold mb-2">Debug Info:</h3>
-          <pre className="whitespace-pre-wrap">
-            {JSON.stringify(debugInfo, null, 2)}
-          </pre>
-        </div>
-      )}
     </div>
   );
 }
