@@ -7,11 +7,25 @@ const router = express.Router();
 
 // Error handler middleware
 const asyncHandler = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
+  Promise.resolve(fn(req, res, next)).catch((error) => {
+    console.error('Route error:', error);
+    res.status(500).json({
+      message: error.message || 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  });
 };
 
 // Create a new post
 router.post('/', asyncHandler(async (req, res) => {
+  console.log('Creating post:', {
+    body: req.body,
+    session: {
+      id: req.sessionID,
+      userId: req.session.userId
+    }
+  });
+
   const { caption, mediaUrl, platforms, scheduledFor } = req.body;
   const userId = req.session.userId;
 
@@ -27,37 +41,44 @@ router.post('/', asyncHandler(async (req, res) => {
     return res.status(400).json({ message: 'Please select at least one platform' });
   }
 
-  try {
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    // Create post document
-    const post = new Post({
-      user: userId,
-      caption,
-      mediaUrl,
-      platforms,
-      scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
-      status: scheduledFor ? 'pending' : 'publishing'
-    });
-
-    await post.save();
-
-    // If no scheduling, post immediately
-    if (!scheduledFor) {
-      await publishPost(post, user);
-    }
-
-    res.status(201).json(post);
-  } catch (error) {
-    console.error('Post creation error:', error);
-    res.status(500).json({ 
-      message: 'Failed to create post',
-      error: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
   }
+
+  // Validate platform connections
+  if (platforms.twitter && !user.socialAccounts?.twitter?.accessToken) {
+    return res.status(400).json({ message: 'Twitter account not connected' });
+  }
+
+  // Create post document
+  const post = new Post({
+    user: userId,
+    caption,
+    mediaUrl,
+    platforms,
+    scheduledFor: scheduledFor ? new Date(scheduledFor) : null,
+    status: 'pending'
+  });
+
+  await post.save();
+  console.log('Post saved:', post._id);
+
+  // If no scheduling, post immediately
+  if (!scheduledFor) {
+    try {
+      await publishPost(post, user);
+      post.status = 'published';
+      await post.save();
+    } catch (error) {
+      console.error('Failed to publish post:', error);
+      post.status = 'failed';
+      await post.save();
+      throw error;
+    }
+  }
+
+  res.status(201).json(post);
 }));
 
 // Get user's posts
@@ -78,27 +99,30 @@ router.get('/', asyncHandler(async (req, res) => {
 async function publishPost(post, user) {
   const errors = [];
 
-  try {
-    if (post.platforms.twitter && user.socialAccounts?.twitter?.accessToken) {
+  if (post.platforms.twitter && user.socialAccounts?.twitter?.accessToken) {
+    try {
       await publishToTwitter(post, user.socialAccounts.twitter);
+    } catch (error) {
+      console.error('Twitter publishing error:', error);
+      errors.push({
+        platform: 'twitter',
+        error: error.message
+      });
     }
+  }
 
-    // Update post status
-    post.status = errors.length > 0 ? 'failed' : 'published';
-    await post.save();
-
-    if (errors.length > 0) {
-      throw new Error(`Publishing failed: ${JSON.stringify(errors)}`);
-    }
-  } catch (error) {
-    console.error('Post publishing error:', error);
-    post.status = 'failed';
-    await post.save();
-    throw error;
+  if (errors.length > 0) {
+    throw new Error(`Publishing failed: ${JSON.stringify(errors)}`);
   }
 }
 
 async function publishToTwitter(post, twitterAccount) {
+  console.log('Publishing to Twitter:', {
+    hasCaption: !!post.caption,
+    hasMedia: !!post.mediaUrl,
+    username: twitterAccount.username
+  });
+
   const client = new TwitterApi({
     appKey: process.env.TWITTER_API_KEY,
     appSecret: process.env.TWITTER_API_SECRET,
@@ -114,20 +138,22 @@ async function publishToTwitter(post, twitterAccount) {
         const buffer = Buffer.from(base64Data, 'base64');
         const mediaId = await client.v1.uploadMedia(buffer, { mimeType: 'image/jpeg' });
         await client.v2.tweet({
-          text: post.caption,
+          text: post.caption || '',
           media: { media_ids: [mediaId] }
         });
       } else {
         // For regular URLs
         const mediaId = await client.v1.uploadMedia(post.mediaUrl);
         await client.v2.tweet({
-          text: post.caption,
+          text: post.caption || '',
           media: { media_ids: [mediaId] }
         });
       }
     } else {
       await client.v2.tweet(post.caption);
     }
+
+    console.log('Successfully published to Twitter');
   } catch (error) {
     console.error('Twitter API error:', error);
     throw new Error(`Twitter API error: ${error.message}`);
@@ -146,6 +172,8 @@ setInterval(async () => {
     for (const post of pendingPosts) {
       try {
         await publishPost(post, post.user);
+        post.status = 'published';
+        await post.save();
       } catch (error) {
         console.error(`Failed to publish scheduled post ${post._id}:`, error);
         post.status = 'failed';
