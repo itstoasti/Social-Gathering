@@ -9,17 +9,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src')
     }
   },
-  server: {
-    port: 5173,
-    proxy: {
-      '/api': {
-        target: 'https://social-gathering.onrender.com',
-        changeOrigin: true,
-        secure: false,
-        rewrite: (path) => path
-      }
-    }
-  },
   build: {
     outDir: 'dist',
     sourcemap: true,
