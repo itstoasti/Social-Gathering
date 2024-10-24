@@ -3,9 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
-import { TwitterApi } from 'twitter-api-v2';
-import { IgApiClient } from 'instagram-private-api';
-import { FacebookAdsApi } from 'facebook-nodejs-business-sdk';
 import authRoutes from './routes/auth.js';
 import postRoutes from './routes/posts.js';
 import { connectDB } from './config/db.js';
@@ -15,35 +12,40 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// First connect to MongoDB
+await connectDB();
+
+// Then set up the session store
+const sessionStore = MongoStore.create({
+  mongoUrl: process.env.MONGODB_URI,
+  ttl: 24 * 60 * 60, // 1 day
+  touchAfter: 24 * 3600 // Only update the session every 24 hours unless the data changes
+});
+
 // Updated CORS configuration
 app.use(cors({
-  origin: [
-    'https://social-crosspost-frontend.onrender.com',
-    'http://localhost:5173'
-  ],
+  origin: process.env.FRONTEND_URL,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Session configuration with MongoDB store
+app.use(express.json());
+
+// Session configuration
 app.use(session({
   secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.MONGODB_URI,
-    ttl: 24 * 60 * 60 // 1 day
-  }),
+  store: sessionStore,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge: 24 * 60 * 60 * 1000, // 24 hours
-    domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
-  }
+    httpOnly: true
+  },
+  name: 'social.sid' // Custom session cookie name
 }));
-
-app.use(express.json());
 
 // Debug middleware for session
 app.use((req, res, next) => {
@@ -69,5 +71,4 @@ app.use((err, req, res, next) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  connectDB();
 });
