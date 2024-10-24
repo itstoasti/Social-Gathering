@@ -26,17 +26,6 @@ const startServer = async () => {
       app.set('trust proxy', 1);
     }
 
-    // CORS configuration - MUST come before other middleware
-    app.use(cors({
-      origin: process.env.NODE_ENV === 'production'
-        ? [process.env.FRONTEND_URL]
-        : ['http://localhost:5173', 'http://127.0.0.1:5173'],
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-      exposedHeaders: ['Set-Cookie']
-    }));
-
     // Session store setup
     const sessionStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
@@ -48,7 +37,7 @@ const startServer = async () => {
       }
     });
 
-    // Session middleware
+    // Session middleware - MUST come before CORS
     app.use(session({
       secret: process.env.SESSION_SECRET,
       name: 'social.sid',
@@ -60,27 +49,34 @@ const startServer = async () => {
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
+        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
         path: '/'
       }
     }));
 
-    // Add headers middleware
-    app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('Access-Control-Allow-Origin', process.env.NODE_ENV === 'production' 
-        ? process.env.FRONTEND_URL 
-        : 'http://localhost:5173');
-      next();
-    });
+    // CORS configuration - MUST come after session middleware
+    app.use(cors({
+      origin: process.env.NODE_ENV === 'production'
+        ? [process.env.FRONTEND_URL]
+        : ['http://localhost:5173'],
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: ['set-cookie']
+    }));
 
     // Session debugging middleware
-    app.use((req, res, next) => {
-      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-      console.log('Session ID:', req.sessionID);
-      console.log('Session Data:', req.session);
-      console.log('Cookies:', req.headers.cookie);
-      next();
-    });
+    if (process.env.NODE_ENV === 'development') {
+      app.use((req, res, next) => {
+        console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+        console.log('Session:', {
+          id: req.sessionID,
+          userId: req.session.userId,
+          oauthTokens: !!req.session.oauthTokens
+        });
+        next();
+      });
+    }
 
     // Routes
     app.use('/api/auth', authRoutes);
@@ -91,8 +87,7 @@ const startServer = async () => {
       res.status(200).json({
         status: 'ok',
         timestamp: new Date().toISOString(),
-        env: process.env.NODE_ENV,
-        sessionID: req.sessionID
+        env: process.env.NODE_ENV
       });
     });
 
