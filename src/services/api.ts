@@ -1,7 +1,5 @@
 import axios, { AxiosError } from 'axios';
 
-const TIMEOUT = 30000; // 30 seconds timeout
-
 // Always use production URL
 const baseURL = 'https://social-gathering.onrender.com/api';
 
@@ -20,7 +18,7 @@ export class ApiError extends Error {
 const api = axios.create({
   baseURL,
   withCredentials: true,
-  timeout: TIMEOUT,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
   },
@@ -43,12 +41,10 @@ export interface ConnectedAccounts {
 // Add request interceptor for debugging
 api.interceptors.request.use(
   config => {
-    if (import.meta.env.DEV) {
-      console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
-        headers: config.headers,
-        data: config.data
-      });
-    }
+    console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
+      headers: config.headers,
+      data: config.data
+    });
     return config;
   },
   error => {
@@ -60,12 +56,10 @@ api.interceptors.request.use(
 // Add response interceptor for better error handling
 api.interceptors.response.use(
   response => {
-    if (import.meta.env.DEV) {
-      console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
-        status: response.status,
-        data: response.data
-      });
-    }
+    console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
+      status: response.status,
+      data: response.data
+    });
     return response;
   },
   (error: AxiosError) => {
@@ -127,22 +121,32 @@ export const auth = {
       .then(response => response.data))
 };
 
+export interface CreatePostData {
+  caption: string;
+  mediaUrl?: string;
+  platforms: {
+    twitter: boolean;
+    instagram: boolean;
+    facebook: boolean;
+  };
+  scheduledFor?: Date;
+}
+
+export interface Post extends CreatePostData {
+  _id: string;
+  user: string;
+  status: 'pending' | 'published' | 'failed';
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const posts = {
-  create: (postData: {
-    caption: string;
-    mediaUrl?: string;
-    platforms: {
-      twitter: boolean;
-      instagram: boolean;
-      facebook: boolean;
-    };
-    scheduledFor?: Date;
-  }) => 
-    withRetry(() => api.post('/posts', postData)
+  create: (postData: CreatePostData) => 
+    withRetry(() => api.post<Post>('/posts', postData)
       .then(response => response.data)),
   
   getAll: () => 
-    withRetry(() => api.get('/posts')
+    withRetry(() => api.get<Post[]>('/posts')
       .then(response => response.data))
 };
 
