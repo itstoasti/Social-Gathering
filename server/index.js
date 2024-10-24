@@ -26,38 +26,35 @@ const startServer = async () => {
       app.set('trust proxy', 1);
     }
 
-    // Session store setup with more aggressive settings
+    // Session store setup
     const sessionStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
-      touchAfter: 0, // Update on every request
-      crypto: {
-        secret: process.env.SESSION_SECRET
-      },
-      stringify: false // Store as native MongoDB data types
+      touchAfter: 0,
+      stringify: false
     });
 
-    // Session middleware with updated configuration
-    app.use(session({
-      secret: process.env.SESSION_SECRET,
+    // Session middleware with production-ready settings
+    const sessionConfig = {
       name: 'social.sid',
-      resave: true,
-      saveUninitialized: true,
+      secret: process.env.SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
       store: sessionStore,
-      rolling: true, // Reset expiration on every response
       proxy: true,
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        path: '/',
+        maxAge: 24 * 60 * 60 * 1000,
         domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
       }
-    }));
+    };
 
-    // CORS configuration - MUST come after session middleware
+    app.use(session(sessionConfig));
+
+    // CORS configuration
     app.use(cors({
       origin: process.env.FRONTEND_URL,
       credentials: true,
@@ -66,39 +63,36 @@ const startServer = async () => {
       exposedHeaders: ['Set-Cookie']
     }));
 
-    // Debug middleware for development
-    if (process.env.NODE_ENV !== 'production') {
-      app.use((req, res, next) => {
-        console.log('Session:', {
-          id: req.sessionID,
-          cookie: req.session.cookie,
-          oauth: {
-            token: !!req.session.oauth_token,
-            secret: !!req.session.oauth_token_secret
-          }
-        });
-        next();
+    // Debug middleware
+    app.use((req, res, next) => {
+      console.log('Session Debug:', {
+        id: req.sessionID,
+        cookie: req.session?.cookie,
+        oauth: {
+          token: !!req.session?.oauth_token,
+          secret: !!req.session?.oauth_token_secret
+        }
       });
-    }
+      next();
+    });
 
     // Routes
     app.use('/api/auth', authRoutes);
     app.use('/api/posts', postRoutes);
 
-    // Health check endpoint
+    // Health check
     app.get('/api/health', (req, res) => {
       res.status(200).json({ 
         status: 'ok',
         env: process.env.NODE_ENV,
         session: {
           id: req.sessionID,
-          active: !!req.session,
-          cookie: req.session.cookie
+          active: !!req.session
         }
       });
     });
 
-    // Error handling middleware
+    // Error handling
     app.use((err, req, res, next) => {
       console.error('Server Error:', err);
       res.status(err.status || 500).json({
@@ -107,10 +101,8 @@ const startServer = async () => {
       });
     });
 
-    // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
-      console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
