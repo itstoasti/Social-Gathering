@@ -1,9 +1,10 @@
 import React, { useState, useCallback } from 'react';
-import { Calendar, Image, Video, Send, Clock, X, Instagram, Facebook } from 'lucide-react';
+import { Send, Clock, X, Instagram, Facebook } from 'lucide-react';
 import SocialLogin from './components/SocialLogin';
 import PostEditor from './components/PostEditor';
 import PostScheduler from './components/PostScheduler';
 import { posts } from './services/api';
+import { compressImage } from './utils/imageCompression';
 
 function App() {
   const [caption, setCaption] = useState('');
@@ -40,58 +41,6 @@ function App() {
     setMediaFile(null);
     setMediaPreview(null);
     setMediaType(null);
-  };
-
-  // Image compression function
-  const compressImage = async (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.src = URL.createObjectURL(file);
-      
-      img.onload = () => {
-        // Create canvas
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        
-        if (!ctx) {
-          reject(new Error('Could not get canvas context'));
-          return;
-        }
-
-        // Calculate new dimensions while maintaining aspect ratio
-        let width = img.width;
-        let height = img.height;
-        const maxDimension = 1200;
-
-        if (width > height && width > maxDimension) {
-          height = (height * maxDimension) / width;
-          width = maxDimension;
-        } else if (height > maxDimension) {
-          width = (width * maxDimension) / height;
-          height = maxDimension;
-        }
-
-        // Set canvas dimensions
-        canvas.width = width;
-        canvas.height = height;
-
-        // Draw image
-        ctx.drawImage(img, 0, 0, width, height);
-
-        // Get compressed data URL
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        
-        // Clean up
-        URL.revokeObjectURL(img.src);
-        
-        resolve(compressedDataUrl);
-      };
-
-      img.onerror = () => {
-        URL.revokeObjectURL(img.src);
-        reject(new Error('Failed to load image'));
-      };
-    });
   };
 
   const handlePost = async () => {
