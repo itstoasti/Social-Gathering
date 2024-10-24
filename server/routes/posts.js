@@ -46,9 +46,35 @@ router.post('/', asyncHandler(async (req, res) => {
     return res.status(404).json({ message: 'User not found' });
   }
 
-  // Validate platform connections
-  if (platforms.twitter && !user.socialAccounts?.twitter?.accessToken) {
-    return res.status(400).json({ message: 'Twitter account not connected' });
+  // Validate Twitter credentials before proceeding
+  if (platforms.twitter) {
+    if (!user.socialAccounts?.twitter?.accessToken || !user.socialAccounts?.twitter?.accessSecret) {
+      return res.status(400).json({ message: 'Twitter account not properly connected. Please reconnect your account.' });
+    }
+
+    try {
+      // Verify Twitter credentials
+      const client = new TwitterApi({
+        appKey: process.env.TWITTER_API_KEY,
+        appSecret: process.env.TWITTER_API_SECRET,
+        accessToken: user.socialAccounts.twitter.accessToken,
+        accessSecret: user.socialAccounts.twitter.accessSecret
+      });
+
+      // Test the credentials by getting user info
+      await client.v2.me();
+    } catch (error) {
+      console.error('Twitter credentials validation failed:', error);
+      
+      // If credentials are invalid, clear them and ask user to reconnect
+      user.socialAccounts.twitter = undefined;
+      await user.save();
+      
+      return res.status(401).json({ 
+        message: 'Twitter authentication expired. Please reconnect your account.',
+        code: 'TWITTER_AUTH_EXPIRED'
+      });
+    }
   }
 
   // Create post document
@@ -104,9 +130,16 @@ async function publishPost(post, user) {
       await publishToTwitter(post, user.socialAccounts.twitter);
     } catch (error) {
       console.error('Twitter publishing error:', error);
+      
+      // Check if it's an auth error
+      if (error.code === 401 || error.code === 403) {
+        throw new Error('Twitter authentication expired. Please reconnect your account.');
+      }
+      
       errors.push({
         platform: 'twitter',
-        error: error.message
+        error: error.message,
+        code: error.code
       });
     }
   }
@@ -123,6 +156,10 @@ async function publishToTwitter(post, twitterAccount) {
     username: twitterAccount.username
   });
 
+  if (!twitterAccount.accessToken || !twitterAccount.accessSecret) {
+    throw new Error('Twitter credentials missing');
+  }
+
   const client = new TwitterApi({
     appKey: process.env.TWITTER_API_KEY,
     appSecret: process.env.TWITTER_API_SECRET,
@@ -131,6 +168,9 @@ async function publishToTwitter(post, twitterAccount) {
   });
 
   try {
+    // Verify credentials first
+    await client.v2.me();
+
     if (post.mediaUrl) {
       // For base64 images
       if (post.mediaUrl.startsWith('data:')) {
@@ -156,7 +196,15 @@ async function publishToTwitter(post, twitterAccount) {
     console.log('Successfully published to Twitter');
   } catch (error) {
     console.error('Twitter API error:', error);
-    throw new Error(`Twitter API error: ${error.message}`);
+    
+    // Enhanced error handling
+    if (error.code === 401 || error.code === 403) {
+      throw new Error('Twitter authentication expired. Please reconnect your account.');
+    } else if (error.code === 429) {
+      throw new Error('Twitter rate limit exceeded. Please try again later.');
+    } else {
+      throw new Error(`Twitter API error: ${error.message}`);
+    }
   }
 }
 
