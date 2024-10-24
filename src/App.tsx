@@ -30,16 +30,25 @@ function App() {
         throw new Error('File size must be less than 10MB');
       }
 
+      // Create object URL first
+      const objectUrl = URL.createObjectURL(file);
+
       // Determine media type
       const type = file.type.startsWith('image/') ? 'image' : 'video';
       setMediaType(type);
 
       // Handle image compression
       if (type === 'image') {
-        const compressed = await compressImage(file);
-        setMediaPreview(compressed);
+        try {
+          const compressed = await compressImage(file);
+          setMediaPreview(compressed);
+          URL.revokeObjectURL(objectUrl); // Clean up original object URL
+        } catch (err) {
+          URL.revokeObjectURL(objectUrl); // Clean up on error
+          throw err;
+        }
       } else {
-        setMediaPreview(URL.createObjectURL(file));
+        setMediaPreview(objectUrl);
       }
 
       setMediaFile(file);
@@ -89,14 +98,14 @@ function App() {
     }
   };
 
-  const handleMediaRemove = () => {
-    setMediaFile(null);
-    setMediaPreview(null);
-    setMediaType(null);
+  const handleMediaRemove = useCallback(() => {
     if (mediaPreview?.startsWith('blob:')) {
       URL.revokeObjectURL(mediaPreview);
     }
-  };
+    setMediaFile(null);
+    setMediaPreview(null);
+    setMediaType(null);
+  }, [mediaPreview]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50">
