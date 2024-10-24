@@ -18,45 +18,51 @@ await connectDB();
 // Then set up the session store
 const sessionStore = MongoStore.create({
   mongoUrl: process.env.MONGODB_URI,
-  ttl: 24 * 60 * 60, // 1 day
-  touchAfter: 24 * 3600 // Only update the session every 24 hours unless the data changes
+  ttl: 24 * 60 * 60,
+  touchAfter: 24 * 3600
 });
 
-// Updated CORS configuration
-app.use(cors({
-  origin: process.env.FRONTEND_URL,
+// Updated CORS configuration for development
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production' 
+    ? process.env.FRONTEND_URL 
+    : 'http://localhost:5173',
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
-}));
+};
 
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Session configuration
 app.use(session({
-  secret: process.env.SESSION_SECRET,
+  secret: process.env.SESSION_SECRET || 'dev-secret-key',
   resave: false,
   saveUninitialized: false,
   store: sessionStore,
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    maxAge: 24 * 60 * 60 * 1000, // 24 hours
+    maxAge: 24 * 60 * 60 * 1000,
     httpOnly: true
   },
-  name: 'social.sid' // Custom session cookie name
+  name: 'social.sid'
 }));
 
-// Debug middleware for session
+// Debug middleware
 app.use((req, res, next) => {
-  console.log('Session ID:', req.sessionID);
-  console.log('Session Data:', req.session);
+  console.log(`${req.method} ${req.path}`, {
+    sessionID: req.sessionID,
+    cookies: req.cookies,
+    session: req.session
+  });
   next();
 });
 
 // Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/posts', postRoutes);
+app.use('/auth', authRoutes);
+app.use('/posts', postRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
