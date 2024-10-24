@@ -21,21 +21,26 @@ function App() {
   const [isPosting, setIsPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleMediaSelect = async (file: File) => {
+  const handleMediaSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
     try {
       setError(null);
       
+      const file = event.target.files?.[0];
+      if (!file) {
+        throw new Error('No file selected');
+      }
+
       // Check file size (10MB limit)
       if (file.size > 10 * 1024 * 1024) {
         throw new Error('File size must be less than 10MB');
       }
 
-      // Create object URL first
-      const objectUrl = URL.createObjectURL(file);
-
       // Determine media type
       const type = file.type.startsWith('image/') ? 'image' : 'video';
       setMediaType(type);
+
+      // Create object URL
+      const objectUrl = URL.createObjectURL(file);
 
       // Handle image compression
       if (type === 'image') {
