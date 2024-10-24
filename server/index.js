@@ -17,16 +17,14 @@ await connectDB();
 
 // Then set up the session store
 const sessionStore = MongoStore.create({
-  mongoUrl: process.env.MONGODB_URI,
+  mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/social-crosspost',
   ttl: 24 * 60 * 60,
   touchAfter: 24 * 3600
 });
 
-// Updated CORS configuration for development
+// CORS configuration
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production' 
-    ? process.env.FRONTEND_URL 
-    : 'http://localhost:5173',
+  origin: ['http://localhost:5173', process.env.FRONTEND_URL].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
@@ -45,7 +43,8 @@ app.use(session({
     secure: process.env.NODE_ENV === 'production',
     sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge: 24 * 60 * 60 * 1000,
-    httpOnly: true
+    httpOnly: true,
+    domain: process.env.NODE_ENV === 'production' ? '.render.com' : 'localhost'
   },
   name: 'social.sid'
 }));
@@ -55,14 +54,18 @@ app.use((req, res, next) => {
   console.log(`${req.method} ${req.path}`, {
     sessionID: req.sessionID,
     cookies: req.cookies,
-    session: req.session
+    session: req.session,
+    headers: {
+      origin: req.headers.origin,
+      referer: req.headers.referer
+    }
   });
   next();
 });
 
-// Routes
-app.use('/auth', authRoutes);
-app.use('/posts', postRoutes);
+// API routes
+app.use('/api/auth', authRoutes);
+app.use('/api/posts', postRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
