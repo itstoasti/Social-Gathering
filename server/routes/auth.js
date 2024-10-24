@@ -39,11 +39,8 @@ router.get('/twitter', asyncHandler(async (req, res) => {
   const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
 
   // Store tokens in session
-  req.session.oauthTokens = {
-    token: oauth_token,
-    tokenSecret: oauth_token_secret,
-    timestamp: Date.now()
-  };
+  req.session.oauth_token = oauth_token;
+  req.session.oauth_token_secret = oauth_token_secret;
 
   // Force session save before redirect
   await new Promise((resolve, reject) => {
@@ -54,7 +51,7 @@ router.get('/twitter', asyncHandler(async (req, res) => {
       } else {
         console.log('Session saved successfully:', {
           id: req.sessionID,
-          hasTokens: !!req.session.oauthTokens
+          hasTokens: !!req.session.oauth_token
         });
         resolve();
       }
@@ -69,24 +66,20 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
   console.log('Callback received:', {
     query: req.query,
     sessionID: req.sessionID,
-    hasTokens: !!req.session.oauthTokens
+    hasTokens: !!req.session.oauth_token
   });
 
   const { oauth_token, oauth_verifier } = req.query;
-  const { oauthTokens } = req.session;
+  const oauth_token_secret = req.session.oauth_token_secret;
 
-  if (!oauth_token || !oauth_verifier || !oauthTokens?.tokenSecret) {
+  if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
     console.error('Missing OAuth data:', {
       hasToken: !!oauth_token,
       hasVerifier: !!oauth_verifier,
-      hasSecret: !!oauthTokens?.tokenSecret,
+      hasSecret: !!oauth_token_secret,
       session: req.session
     });
     throw new Error('Missing OAuth tokens');
-  }
-
-  if (oauth_token !== oauthTokens.token) {
-    throw new Error('OAuth token mismatch');
   }
 
   try {
@@ -94,11 +87,11 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
       appKey: process.env.TWITTER_API_KEY,
       appSecret: process.env.TWITTER_API_SECRET,
       accessToken: oauth_token,
-      accessSecret: oauthTokens.tokenSecret
+      accessSecret: oauth_token_secret
     });
 
-    const { client: loggedClient, accessToken, accessSecret } = await client.login(oauth_verifier);
-    const { data: userData } = await loggedClient.v2.me();
+    const { accessToken, accessSecret } = await client.login(oauth_verifier);
+    const { data: userData } = await client.v2.me();
     
     console.log('Twitter login successful:', userData.username);
 
@@ -127,7 +120,8 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
     
     // Update session
     req.session.userId = user._id;
-    delete req.session.oauthTokens; // Clear OAuth tokens
+    delete req.session.oauth_token;
+    delete req.session.oauth_token_secret;
 
     // Save session before redirect
     await new Promise((resolve, reject) => {
@@ -156,7 +150,8 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
 router.get('/debug-session', (req, res) => {
   res.json({
     sessionId: req.sessionID,
-    hasOAuthTokens: !!req.session.oauthTokens,
+    hasOAuthToken: !!req.session.oauth_token,
+    hasOAuthTokenSecret: !!req.session.oauth_token_secret,
     userId: req.session.userId,
     cookie: req.session.cookie
   });
