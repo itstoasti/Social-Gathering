@@ -5,197 +5,137 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
-// Debug endpoint
-router.get('/debug-session', (req, res) => {
-  const sessionInfo = {
-    sessionID: req.sessionID,
-    session: { ...req.session },
-    cookies: req.cookies,
-    headers: {
-      'user-agent': req.headers['user-agent'],
-      'cookie': req.headers.cookie,
-      'origin': req.headers.origin,
-      'referer': req.headers.referer
-    }
-  };
-
-  // Remove sensitive data
-  if (sessionInfo.session.oauth_token_secret) {
-    sessionInfo.session.oauth_token_secret = '[REDACTED]';
-  }
-  
-  console.log('Debug session info:', sessionInfo);
-  res.json(sessionInfo);
-});
-
-// Get connected accounts status
-router.get('/accounts', async (req, res) => {
-  try {
-    console.log('Getting accounts status. Session:', req.sessionID);
-    const userId = req.session.userId;
-    
-    if (!userId) {
-      console.log('No user ID in session');
-      return res.json({
-        twitter: { connected: false },
-        instagram: { connected: false },
-        facebook: { connected: false }
-      });
-    }
-
-    const user = await User.findById(userId);
-    if (!user) {
-      console.log('User not found:', userId);
-      return res.json({
-        twitter: { connected: false },
-        instagram: { connected: false },
-        facebook: { connected: false }
-      });
-    }
-
-    const accounts = {
-      twitter: {
-        connected: !!user.socialAccounts?.twitter?.accessToken,
-        username: user.socialAccounts?.twitter?.username
-      },
-      instagram: {
-        connected: !!user.socialAccounts?.instagram?.accessToken,
-        username: user.socialAccounts?.instagram?.username
-      },
-      facebook: {
-        connected: !!user.socialAccounts?.facebook?.accessToken,
-        pageName: user.socialAccounts?.facebook?.pageName
-      }
-    };
-
-    console.log('Returning accounts status:', accounts);
-    return res.json(accounts);
-  } catch (error) {
-    console.error('Get accounts status error:', error);
-    res.status(500).json({ message: 'Failed to get accounts status' });
-  }
-});
+// Error handler middleware
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch((error) => {
+    console.error('Route error:', error);
+    res.status(500).json({
+      message: error.message || 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  });
+};
 
 // Check auth status
-router.get('/status', (req, res) => {
+router.get('/status', asyncHandler(async (req, res) => {
   res.json({
     authenticated: !!req.session.userId,
     sessionId: req.sessionID
   });
-});
+}));
+
+// Get connected accounts status
+router.get('/accounts', asyncHandler(async (req, res) => {
+  const userId = req.session.userId;
+  
+  if (!userId) {
+    return res.json({
+      twitter: { connected: false },
+      instagram: { connected: false },
+      facebook: { connected: false }
+    });
+  }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.json({
+      twitter: { connected: false },
+      instagram: { connected: false },
+      facebook: { connected: false }
+    });
+  }
+
+  const accounts = {
+    twitter: {
+      connected: !!user.socialAccounts?.twitter?.accessToken,
+      username: user.socialAccounts?.twitter?.username
+    },
+    instagram: {
+      connected: !!user.socialAccounts?.instagram?.accessToken,
+      username: user.socialAccounts?.instagram?.username
+    },
+    facebook: {
+      connected: !!user.socialAccounts?.facebook?.accessToken,
+      pageName: user.socialAccounts?.facebook?.pageName
+    }
+  };
+
+  res.json(accounts);
+}));
 
 // Twitter OAuth
-router.get('/twitter', async (req, res) => {
-  try {
-    console.log('Starting Twitter auth. Session:', req.sessionID);
-    const client = new TwitterApi({
-      appKey: process.env.TWITTER_API_KEY,
-      appSecret: process.env.TWITTER_API_SECRET
+router.get('/twitter', asyncHandler(async (req, res) => {
+  const client = new TwitterApi({
+    appKey: process.env.TWITTER_API_KEY,
+    appSecret: process.env.TWITTER_API_SECRET
+  });
+
+  const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(
+    `${process.env.BASE_URL}/api/auth/twitter/callback`
+  );
+
+  req.session.oauth_token = oauth_token;
+  req.session.oauth_token_secret = oauth_token_secret;
+  
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) reject(err);
+      else resolve();
     });
+  });
 
-    const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(
-      `${process.env.BASE_URL || 'http://localhost:5000'}/api/auth/twitter/callback`
-    );
-
-    // Store OAuth tokens in session
-    req.session.oauth_token = oauth_token;
-    req.session.oauth_token_secret = oauth_token_secret;
-    
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('Failed to save session:', err);
-          reject(err);
-        } else {
-          console.log('Session saved successfully');
-          resolve();
-        }
-      });
-    });
-
-    console.log('Twitter auth URL generated:', url);
-    res.json({ url });
-  } catch (error) {
-    console.error('Twitter auth error:', error);
-    res.status(500).json({ message: 'Authentication failed', error: error.message });
-  }
-});
+  res.json({ url });
+}));
 
 // Twitter OAuth callback
-router.get('/twitter/callback', async (req, res) => {
-  try {
-    console.log('Twitter callback received');
-    console.log('Query params:', req.query);
-    console.log('Session ID:', req.sessionID);
-    console.log('Session data:', req.session);
+router.get('/twitter/callback', asyncHandler(async (req, res) => {
+  const { oauth_token, oauth_verifier } = req.query;
+  const { oauth_token_secret } = req.session;
 
-    const { oauth_token, oauth_verifier } = req.query;
-    const { oauth_token_secret } = req.session;
-
-    if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
-      console.error('Missing OAuth tokens:', {
-        oauth_token: !!oauth_token,
-        oauth_verifier: !!oauth_verifier,
-        oauth_token_secret: !!oauth_token_secret
-      });
-      throw new Error('Missing OAuth tokens');
-    }
-
-    const client = new TwitterApi({
-      appKey: process.env.TWITTER_API_KEY,
-      appSecret: process.env.TWITTER_API_SECRET,
-      accessToken: oauth_token,
-      accessSecret: oauth_token_secret
-    });
-
-    console.log('Attempting Twitter login...');
-    const loginResult = await client.login(oauth_verifier);
-    console.log('Twitter login successful:', loginResult.screenName);
-
-    let user = await User.findById(req.session.userId);
-    if (!user) {
-      console.log('Creating new user for:', loginResult.screenName);
-      user = new User({
-        email: `${loginResult.screenName}@twitter.com`,
-        socialAccounts: {
-          twitter: {
-            accessToken: loginResult.accessToken,
-            accessSecret: loginResult.accessSecret,
-            username: loginResult.screenName
-          }
-        }
-      });
-    } else {
-      console.log('Updating existing user:', user.email);
-      user.socialAccounts.twitter = {
-        accessToken: loginResult.accessToken,
-        accessSecret: loginResult.accessSecret,
-        username: loginResult.screenName
-      };
-    }
-
-    await user.save();
-    req.session.userId = user._id;
-
-    // Save session before redirect
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('Failed to save session:', err);
-          reject(err);
-        } else {
-          console.log('Session saved successfully');
-          resolve();
-        }
-      });
-    });
-
-    console.log('Redirecting to frontend...');
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?auth=success`);
-  } catch (error) {
-    console.error('Twitter callback error:', error);
-    res.redirect(`${process.env.FRONTEND_URL || 'http://localhost:5173'}?auth=error&message=${encodeURIComponent(error.message)}`);
+  if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
+    throw new Error('Missing OAuth tokens');
   }
-});
+
+  const client = new TwitterApi({
+    appKey: process.env.TWITTER_API_KEY,
+    appSecret: process.env.TWITTER_API_SECRET,
+    accessToken: oauth_token,
+    accessSecret: oauth_token_secret
+  });
+
+  const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
+
+  let user = await User.findById(req.session.userId);
+  if (!user) {
+    user = new User({
+      email: `${screenName}@twitter.com`,
+      socialAccounts: {
+        twitter: {
+          accessToken,
+          accessSecret,
+          username: screenName
+        }
+      }
+    });
+  } else {
+    user.socialAccounts.twitter = {
+      accessToken,
+      accessSecret,
+      username: screenName
+    };
+  }
+
+  await user.save();
+  req.session.userId = user._id;
+
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+
+  res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
+}));
 
 export default router;
