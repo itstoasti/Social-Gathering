@@ -1,9 +1,9 @@
 import axios, { AxiosError } from 'axios';
 
 // Use environment-specific API URL
-const baseURL = process.env.NODE_ENV === 'production'
+const baseURL = import.meta.env.PROD
   ? 'https://social-gathering.onrender.com/api'
-  : '/api';
+  : 'http://localhost:5000/api';
 
 export class ApiError extends Error {
   status?: number;
