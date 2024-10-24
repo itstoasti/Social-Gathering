@@ -1,7 +1,12 @@
 import axios from 'axios';
 
+// Get the base URL from environment or default to the production URL
+const baseURL = import.meta.env.DEV 
+  ? '/api' // This will use Vite's proxy in development
+  : 'https://social-gathering.onrender.com/api';
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'https://social-gathering.onrender.com/api',
+  baseURL,
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
@@ -24,7 +29,11 @@ export interface ConnectedAccounts {
 api.interceptors.response.use(
   response => response,
   error => {
-    console.error('API Error:', error.response?.data || error.message);
+    console.error('API Error:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message
+    });
     return Promise.reject(error);
   }
 );
@@ -34,7 +43,8 @@ export const auth = {
   getInstagramAuthUrl: () => api.get<{ url: string }>('/auth/instagram'),
   getFacebookAuthUrl: () => api.get<{ url: string }>('/auth/facebook'),
   getConnectedAccounts: () => api.get<ConnectedAccounts>('/auth/accounts'),
-  checkAuthStatus: () => api.get<{ authenticated: boolean }>('/auth/status')
+  checkAuthStatus: () => api.get<{ authenticated: boolean }>('/auth/status'),
+  debugSession: () => api.get('/auth/debug-session')
 };
 
 export const posts = {
