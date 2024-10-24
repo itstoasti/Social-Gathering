@@ -82,63 +82,74 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
       hasSecret: !!oauthTokens?.tokenSecret,
       session: req.session
     });
-    throw new Error('Missing OAuth token secret in session');
+    throw new Error('Missing OAuth tokens');
   }
 
   if (oauth_token !== oauthTokens.token) {
     throw new Error('OAuth token mismatch');
   }
 
-  const client = new TwitterApi({
-    appKey: process.env.TWITTER_API_KEY,
-    appSecret: process.env.TWITTER_API_SECRET,
-    accessToken: oauth_token,
-    accessSecret: oauthTokens.tokenSecret
-  });
-
-  const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
-  console.log('Twitter login successful:', screenName);
-
-  // Create or update user
-  let user = await User.findById(req.session.userId);
-  if (!user) {
-    user = new User({
-      email: `${screenName}@twitter.com`,
-      socialAccounts: {
-        twitter: { accessToken, accessSecret, username: screenName }
-      }
+  try {
+    const client = new TwitterApi({
+      appKey: process.env.TWITTER_API_KEY,
+      appSecret: process.env.TWITTER_API_SECRET,
+      accessToken: oauth_token,
+      accessSecret: oauthTokens.tokenSecret
     });
-  } else {
-    user.socialAccounts.twitter = {
-      accessToken,
-      accessSecret,
-      username: screenName
-    };
+
+    const { client: loggedClient, accessToken, accessSecret } = await client.login(oauth_verifier);
+    const { data: userData } = await loggedClient.v2.me();
+    
+    console.log('Twitter login successful:', userData.username);
+
+    // Create or update user
+    let user = await User.findById(req.session.userId);
+    if (!user) {
+      user = new User({
+        email: `${userData.username}@twitter.com`,
+        socialAccounts: {
+          twitter: {
+            accessToken,
+            accessSecret,
+            username: userData.username
+          }
+        }
+      });
+    } else {
+      user.socialAccounts.twitter = {
+        accessToken,
+        accessSecret,
+        username: userData.username
+      };
+    }
+
+    await user.save();
+    
+    // Update session
+    req.session.userId = user._id;
+    delete req.session.oauthTokens; // Clear OAuth tokens
+
+    // Save session before redirect
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error('Failed to save session:', err);
+          reject(err);
+        } else {
+          console.log('Session saved with user:', {
+            id: req.sessionID,
+            userId: req.session.userId
+          });
+          resolve();
+        }
+      });
+    });
+
+    res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
+  } catch (error) {
+    console.error('Twitter login error:', error);
+    throw new Error('Failed to authenticate with Twitter');
   }
-
-  await user.save();
-  
-  // Update session
-  req.session.userId = user._id;
-  delete req.session.oauthTokens; // Clear OAuth tokens
-
-  // Save session before redirect
-  await new Promise((resolve, reject) => {
-    req.session.save((err) => {
-      if (err) {
-        console.error('Failed to save session:', err);
-        reject(err);
-      } else {
-        console.log('Session saved with user:', {
-          id: req.sessionID,
-          userId: req.session.userId
-        });
-        resolve();
-      }
-    });
-  });
-
-  res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
 }));
 
 // Debug endpoint
