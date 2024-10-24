@@ -10,8 +10,10 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
-        changeOrigin: true
+        target: process.env.VITE_API_URL || 'https://social-gathering.onrender.com',
+        changeOrigin: true,
+        secure: false,
+        withCredentials: true
       }
     }
   }
