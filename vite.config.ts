@@ -13,7 +13,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'https://social-gathering.onrender.com',
         changeOrigin: true,
         secure: false,
         rewrite: (path) => path
