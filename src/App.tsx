@@ -39,7 +39,7 @@ function App() {
       const type = file.type.startsWith('image/') ? 'image' : 'video';
       setMediaType(type);
 
-      // Create object URL
+      // Create object URL for preview
       const objectUrl = URL.createObjectURL(file);
 
       // Handle image compression
@@ -47,9 +47,9 @@ function App() {
         try {
           const compressed = await compressImage(file);
           setMediaPreview(compressed);
-          URL.revokeObjectURL(objectUrl); // Clean up original object URL
+          URL.revokeObjectURL(objectUrl);
         } catch (err) {
-          URL.revokeObjectURL(objectUrl); // Clean up on error
+          URL.revokeObjectURL(objectUrl);
           throw err;
         }
       } else {
@@ -87,13 +87,18 @@ function App() {
 
       await posts.create(postData);
 
-      // Reset form
+      // Reset form on success
       setCaption('');
       setMediaFile(null);
       setMediaPreview(null);
       setMediaType(null);
       setScheduledTime('');
       setIsScheduling(false);
+      setSelectedPlatforms({
+        twitter: false,
+        instagram: false,
+        facebook: false
+      });
 
     } catch (err) {
       console.error('Failed to create post:', err);
