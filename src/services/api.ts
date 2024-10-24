@@ -1,9 +1,8 @@
 import axios from 'axios';
 
-// Get the base URL from environment or default to the production URL
-const baseURL = import.meta.env.DEV 
-  ? '/api' // This will use Vite's proxy in development
-  : 'https://social-gathering.onrender.com/api';
+const baseURL = import.meta.env.PROD 
+  ? 'https://social-gathering.onrender.com/api'
+  : '/api';
 
 const api = axios.create({
   baseURL,
@@ -29,11 +28,15 @@ export interface ConnectedAccounts {
 api.interceptors.response.use(
   response => response,
   error => {
-    console.error('API Error:', {
-      status: error.response?.status,
-      data: error.response?.data,
-      message: error.message
-    });
+    if (error.response) {
+      console.error('API Error:', {
+        status: error.response.status,
+        data: error.response.data,
+        message: error.message
+      });
+    } else {
+      console.error('API Error:', error.message);
+    }
     return Promise.reject(error);
   }
 );
