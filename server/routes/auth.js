@@ -34,9 +34,11 @@ router.get('/twitter', asyncHandler(async (req, res) => {
   });
 
   const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
-  console.log('Callback URL:', callbackUrl);
+  console.log('Generating Twitter auth URL with callback:', callbackUrl);
 
-  const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
+  const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl, {
+    linkMode: 'authorize'
+  });
 
   // Store tokens in session
   req.session.oauth_token = oauth_token;
@@ -49,9 +51,10 @@ router.get('/twitter', asyncHandler(async (req, res) => {
         console.error('Failed to save session:', err);
         reject(err);
       } else {
-        console.log('Session saved successfully:', {
+        console.log('Session saved with OAuth tokens:', {
           id: req.sessionID,
-          hasTokens: !!req.session.oauth_token
+          hasToken: !!oauth_token,
+          hasSecret: !!oauth_token_secret
         });
         resolve();
       }
@@ -63,23 +66,23 @@ router.get('/twitter', asyncHandler(async (req, res) => {
 
 // Twitter OAuth callback
 router.get('/twitter/callback', asyncHandler(async (req, res) => {
-  console.log('Callback received:', {
-    query: req.query,
-    sessionID: req.sessionID,
-    hasTokens: !!req.session.oauth_token
+  const { oauth_token, oauth_verifier } = req.query;
+  const { oauth_token_secret } = req.session;
+
+  console.log('Twitter callback received:', {
+    hasQueryToken: !!oauth_token,
+    hasQueryVerifier: !!oauth_verifier,
+    hasSessionSecret: !!oauth_token_secret,
+    sessionID: req.sessionID
   });
 
-  const { oauth_token, oauth_verifier } = req.query;
-  const oauth_token_secret = req.session.oauth_token_secret;
-
   if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
-    console.error('Missing OAuth data:', {
-      hasToken: !!oauth_token,
-      hasVerifier: !!oauth_verifier,
-      hasSecret: !!oauth_token_secret,
-      session: req.session
-    });
     throw new Error('Missing OAuth tokens');
+  }
+
+  // Verify tokens match
+  if (oauth_token !== req.session.oauth_token) {
+    throw new Error('OAuth token mismatch');
   }
 
   try {
@@ -90,21 +93,19 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
       accessSecret: oauth_token_secret
     });
 
-    const { accessToken, accessSecret } = await client.login(oauth_verifier);
-    const { data: userData } = await client.v2.me();
-    
-    console.log('Twitter login successful:', userData.username);
+    const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
+    console.log('Twitter login successful:', { screenName });
 
     // Create or update user
     let user = await User.findById(req.session.userId);
     if (!user) {
       user = new User({
-        email: `${userData.username}@twitter.com`,
+        email: `${screenName}@twitter.com`,
         socialAccounts: {
           twitter: {
             accessToken,
             accessSecret,
-            username: userData.username
+            username: screenName
           }
         }
       });
@@ -112,12 +113,13 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
       user.socialAccounts.twitter = {
         accessToken,
         accessSecret,
-        username: userData.username
+        username: screenName
       };
     }
 
     await user.save();
-    
+    console.log('User saved:', user._id);
+
     // Update session
     req.session.userId = user._id;
     delete req.session.oauth_token;
@@ -142,31 +144,44 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error('Twitter login error:', error);
-    throw new Error('Failed to authenticate with Twitter');
+    throw error;
   }
 }));
 
 // Debug endpoint
 router.get('/debug-session', (req, res) => {
-  res.json({
+  const sessionInfo = {
     sessionId: req.sessionID,
     hasOAuthToken: !!req.session.oauth_token,
     hasOAuthTokenSecret: !!req.session.oauth_token_secret,
     userId: req.session.userId,
-    cookie: req.session.cookie
-  });
+    cookie: req.session.cookie,
+    headers: {
+      'user-agent': req.headers['user-agent'],
+      'cookie': req.headers.cookie,
+      'origin': req.headers.origin
+    }
+  };
+
+  res.json(sessionInfo);
 });
 
 // Check auth status
 router.get('/status', (req, res) => {
   res.json({
     authenticated: !!req.session.userId,
-    sessionId: req.sessionID
+    sessionId: req.sessionID,
+    hasSession: !!req.session
   });
 });
 
 // Get connected accounts
 router.get('/accounts', asyncHandler(async (req, res) => {
+  console.log('Getting accounts status:', {
+    sessionID: req.sessionID,
+    userId: req.session.userId
+  });
+
   if (!req.session.userId) {
     return res.json({
       twitter: { connected: false },
@@ -184,10 +199,34 @@ router.get('/accounts', asyncHandler(async (req, res) => {
     });
   }
 
+  // Verify Twitter credentials if connected
+  let twitterConnected = false;
+  let twitterUsername = null;
+
+  if (user.socialAccounts?.twitter?.accessToken) {
+    try {
+      const client = new TwitterApi({
+        appKey: process.env.TWITTER_API_KEY,
+        appSecret: process.env.TWITTER_API_SECRET,
+        accessToken: user.socialAccounts.twitter.accessToken,
+        accessSecret: user.socialAccounts.twitter.accessSecret
+      });
+
+      const { data } = await client.v2.me();
+      twitterConnected = true;
+      twitterUsername = data.username;
+    } catch (error) {
+      console.error('Failed to verify Twitter credentials:', error);
+      // Clear invalid credentials
+      user.socialAccounts.twitter = undefined;
+      await user.save();
+    }
+  }
+
   res.json({
     twitter: {
-      connected: !!user.socialAccounts?.twitter?.accessToken,
-      username: user.socialAccounts?.twitter?.username
+      connected: twitterConnected,
+      username: twitterUsername
     },
     instagram: {
       connected: !!user.socialAccounts?.instagram?.accessToken,
