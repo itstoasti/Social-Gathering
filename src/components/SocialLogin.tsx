@@ -16,15 +16,27 @@ function SocialLogin() {
   });
   const [accounts, setAccounts] = useState<ConnectedAccounts>(initialAccounts);
   const [error, setError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('auth') === 'success') {
+        const authStatus = urlParams.get('auth');
+        const authError = urlParams.get('message');
+
+        if (authError) {
+          setError(`Authentication error: ${decodeURIComponent(authError)}`);
+          return;
+        }
+
+        if (authStatus === 'success') {
+          console.log('Auth callback detected, fetching accounts...');
           await fetchConnectedAccounts();
+          // Clear URL parameters
           window.history.replaceState({}, document.title, window.location.pathname);
         } else {
+          console.log('No auth callback, checking current status...');
           await fetchConnectedAccounts();
         }
       } catch (err) {
@@ -38,7 +50,24 @@ function SocialLogin() {
 
   const fetchConnectedAccounts = async () => {
     try {
+      console.log('Fetching connected accounts...');
+      
+      // First check auth status
+      const authStatus = await auth.checkAuthStatus();
+      console.log('Auth status:', authStatus.data);
+      
+      // Get debug session info
+      const debugResponse = await fetch('/api/auth/debug-session', {
+        credentials: 'include'
+      });
+      const debugData = await debugResponse.json();
+      console.log('Debug session data:', debugData);
+      setDebugInfo(debugData);
+
+      // Get connected accounts
       const { data } = await auth.getConnectedAccounts();
+      console.log('Connected accounts:', data);
+      
       setAccounts(data);
       setError(null);
     } catch (err) {
@@ -52,8 +81,12 @@ function SocialLogin() {
     try {
       setLoading(prev => ({ ...prev, twitter: true }));
       setError(null);
+      
+      console.log('Requesting Twitter auth URL...');
       const { data } = await auth.getTwitterAuthUrl();
+      
       if (data?.url) {
+        console.log('Redirecting to Twitter auth URL:', data.url);
         window.location.href = data.url;
       } else {
         throw new Error('No auth URL received');
@@ -114,6 +147,15 @@ function SocialLogin() {
           <span className="text-gray-500">Coming Soon</span>
         </button>
       </div>
+
+      {debugInfo && (
+        <div className="mt-6 p-4 bg-gray-50 rounded-lg text-sm">
+          <h3 className="font-semibold mb-2">Debug Info:</h3>
+          <pre className="whitespace-pre-wrap">
+            {JSON.stringify(debugInfo, null, 2)}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
