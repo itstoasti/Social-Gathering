@@ -26,18 +26,6 @@ const api = axios.create({
   maxBodyLength: Infinity
 });
 
-export interface ConnectedAccount {
-  username?: string;
-  pageName?: string;
-  connected: boolean;
-}
-
-export interface ConnectedAccounts {
-  twitter: ConnectedAccount;
-  instagram: ConnectedAccount;
-  facebook: ConnectedAccount;
-}
-
 // Add request interceptor for debugging
 api.interceptors.request.use(
   config => {
@@ -81,6 +69,18 @@ api.interceptors.response.use(
     return Promise.reject(apiError);
   }
 );
+
+export interface ConnectedAccount {
+  username?: string;
+  pageName?: string;
+  connected: boolean;
+}
+
+export interface ConnectedAccounts {
+  twitter: ConnectedAccount;
+  instagram: ConnectedAccount;
+  facebook: ConnectedAccount;
+}
 
 // Retry mechanism for failed requests
 const withRetry = async (fn: () => Promise<any>, retries = 2, delay = 1000) => {
