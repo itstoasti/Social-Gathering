@@ -21,37 +21,39 @@ const startServer = async () => {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
 
-    // Session store setup with more robust configuration
+    // Trust proxy for secure cookies in production
+    if (process.env.NODE_ENV === 'production') {
+      app.set('trust proxy', 1);
+    }
+
+    // Session store setup
     const sessionStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
-      touchAfter: 24 * 3600,
       autoRemove: 'native',
+      touchAfter: 24 * 3600,
       crypto: {
         secret: process.env.SESSION_SECRET
-      },
-      collectionName: 'sessions'
+      }
     });
 
-    // Session middleware - MUST come before CORS
+    // Session middleware
     app.use(session({
       secret: process.env.SESSION_SECRET,
       name: 'social.sid',
-      resave: true,
-      saveUninitialized: true,
+      resave: false,
+      saveUninitialized: false,
       store: sessionStore,
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
-      },
-      rolling: true,
-      unset: 'destroy'
+        path: '/'
+      }
     }));
 
-    // CORS configuration - MUST come after session
+    // CORS configuration
     app.use(cors({
       origin: process.env.NODE_ENV === 'production'
         ? process.env.FRONTEND_URL
@@ -62,16 +64,11 @@ const startServer = async () => {
       exposedHeaders: ['Set-Cookie']
     }));
 
-    // Trust proxy for secure cookies in production
-    if (process.env.NODE_ENV === 'production') {
-      app.set('trust proxy', 1);
-    }
-
     // Session debugging middleware
     app.use((req, res, next) => {
       console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
       console.log('Session ID:', req.sessionID);
-      console.log('Session Data:', JSON.stringify(req.session, null, 2));
+      console.log('Session Data:', req.session);
       console.log('Cookies:', req.headers.cookie);
       next();
     });
