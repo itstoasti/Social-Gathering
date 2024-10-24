@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios';
 
-const TIMEOUT = 10000; // 10 seconds timeout
+const TIMEOUT = 30000; // 30 seconds timeout
 
 // Always use production URL
 const baseURL = 'https://social-gathering.onrender.com/api';
@@ -23,7 +23,9 @@ const api = axios.create({
   timeout: TIMEOUT,
   headers: {
     'Content-Type': 'application/json'
-  }
+  },
+  maxContentLength: Infinity,
+  maxBodyLength: Infinity
 });
 
 export interface ConnectedAccount {
@@ -86,23 +88,12 @@ api.interceptors.response.use(
   }
 );
 
-// Health check function
-const checkHealth = async () => {
-  try {
-    const response = await api.get('/health');
-    return response.data;
-  } catch (error) {
-    console.error('Health check failed:', error);
-    throw error;
-  }
-};
-
 // Retry mechanism for failed requests
 const withRetry = async (fn: () => Promise<any>, retries = 2, delay = 1000) => {
   try {
     return await fn();
   } catch (error) {
-    if (retries > 0) {
+    if (retries > 0 && error instanceof ApiError && (!error.status || error.status >= 500)) {
       await new Promise(resolve => setTimeout(resolve, delay));
       return withRetry(fn, retries - 1, delay * 2);
     }
