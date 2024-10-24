@@ -7,11 +7,25 @@ const router = express.Router();
 
 // Debug endpoint
 router.get('/debug-session', (req, res) => {
-  res.json({
-    sessionId: req.sessionID,
-    session: req.session,
-    cookies: req.cookies
-  });
+  const sessionInfo = {
+    sessionID: req.sessionID,
+    session: { ...req.session },
+    cookies: req.cookies,
+    headers: {
+      'user-agent': req.headers['user-agent'],
+      'cookie': req.headers.cookie,
+      'origin': req.headers.origin,
+      'referer': req.headers.referer
+    }
+  };
+
+  // Remove sensitive data
+  if (sessionInfo.session.oauth_token_secret) {
+    sessionInfo.session.oauth_token_secret = '[REDACTED]';
+  }
+  
+  console.log('Debug session info:', sessionInfo);
+  res.json(sessionInfo);
 });
 
 // Get connected accounts status
@@ -39,8 +53,7 @@ router.get('/accounts', async (req, res) => {
       });
     }
 
-    console.log('Found user:', user.email);
-    return res.json({
+    const accounts = {
       twitter: {
         connected: !!user.socialAccounts?.twitter?.accessToken,
         username: user.socialAccounts?.twitter?.username
@@ -53,7 +66,10 @@ router.get('/accounts', async (req, res) => {
         connected: !!user.socialAccounts?.facebook?.accessToken,
         pageName: user.socialAccounts?.facebook?.pageName
       }
-    });
+    };
+
+    console.log('Returning accounts status:', accounts);
+    return res.json(accounts);
   } catch (error) {
     console.error('Get accounts status error:', error);
     res.status(500).json({ message: 'Failed to get accounts status' });
@@ -62,11 +78,20 @@ router.get('/accounts', async (req, res) => {
 
 // Check auth status
 router.get('/status', (req, res) => {
-  console.log('Checking auth status. Session:', req.sessionID);
-  res.json({ 
+  const status = {
     authenticated: !!req.session.userId,
-    sessionId: req.sessionID 
-  });
+    sessionId: req.sessionID,
+    hasSession: !!req.session,
+    sessionData: { ...req.session }
+  };
+
+  // Remove sensitive data
+  if (status.sessionData.oauth_token_secret) {
+    status.sessionData.oauth_token_secret = '[REDACTED]';
+  }
+
+  console.log('Auth status:', status);
+  res.json(status);
 });
 
 // Twitter OAuth
@@ -88,8 +113,13 @@ router.get('/twitter', async (req, res) => {
     
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
-        if (err) reject(err);
-        else resolve();
+        if (err) {
+          console.error('Failed to save session:', err);
+          reject(err);
+        } else {
+          console.log('Session saved successfully');
+          resolve();
+        }
       });
     });
 
@@ -104,17 +134,20 @@ router.get('/twitter', async (req, res) => {
 // Twitter OAuth callback
 router.get('/twitter/callback', async (req, res) => {
   try {
-    console.log('Twitter callback. Session:', req.sessionID);
+    console.log('Twitter callback received');
+    console.log('Query params:', req.query);
+    console.log('Session ID:', req.sessionID);
+    console.log('Session data:', req.session);
+
     const { oauth_token, oauth_verifier } = req.query;
     const { oauth_token_secret } = req.session;
 
-    console.log('OAuth tokens:', {
-      oauth_token,
-      oauth_verifier,
-      session_oauth_token_secret: oauth_token_secret
-    });
-
     if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
+      console.error('Missing OAuth tokens:', {
+        oauth_token: !!oauth_token,
+        oauth_verifier: !!oauth_verifier,
+        oauth_token_secret: !!oauth_token_secret
+      });
       throw new Error('Missing OAuth tokens');
     }
 
@@ -125,11 +158,13 @@ router.get('/twitter/callback', async (req, res) => {
       accessSecret: oauth_token_secret
     });
 
+    console.log('Attempting Twitter login...');
     const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier as string);
     console.log('Twitter login successful:', screenName);
 
     let user = await User.findById(req.session.userId);
     if (!user) {
+      console.log('Creating new user for:', screenName);
       user = new User({
         email: `${screenName}@twitter.com`,
         socialAccounts: {
@@ -141,6 +176,7 @@ router.get('/twitter/callback', async (req, res) => {
         }
       });
     } else {
+      console.log('Updating existing user:', user.email);
       user.socialAccounts.twitter = {
         accessToken,
         accessSecret,
@@ -154,12 +190,17 @@ router.get('/twitter/callback', async (req, res) => {
     // Save session before redirect
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
-        if (err) reject(err);
-        else resolve();
+        if (err) {
+          console.error('Failed to save session:', err);
+          reject(err);
+        } else {
+          console.log('Session saved successfully');
+          resolve();
+        }
       });
     });
 
-    console.log('User saved and session updated');
+    console.log('Redirecting to frontend...');
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error('Twitter callback error:', error);
