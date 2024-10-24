@@ -57,12 +57,13 @@ function SocialLogin() {
       console.log('Auth status:', authStatus.data);
       
       // Get debug session info
-      const debugResponse = await fetch('/api/auth/debug-session', {
-        credentials: 'include'
-      });
-      const debugData = await debugResponse.json();
-      console.log('Debug session data:', debugData);
-      setDebugInfo(debugData);
+      try {
+        const debugResponse = await auth.debugSession();
+        console.log('Debug session data:', debugResponse.data);
+        setDebugInfo(debugResponse.data);
+      } catch (debugErr) {
+        console.warn('Debug session fetch failed:', debugErr);
+      }
 
       // Get connected accounts
       const { data } = await auth.getConnectedAccounts();
@@ -70,9 +71,9 @@ function SocialLogin() {
       
       setAccounts(data);
       setError(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch connected accounts:', err);
-      setError('Failed to fetch connected accounts');
+      setError(err.response?.data?.message || 'Failed to fetch connected accounts');
       setAccounts(initialAccounts);
     }
   };
@@ -91,9 +92,9 @@ function SocialLogin() {
       } else {
         throw new Error('No auth URL received');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to get Twitter auth URL:', err);
-      setError('Failed to connect to Twitter');
+      setError(err.response?.data?.message || 'Failed to connect to Twitter');
     } finally {
       setLoading(prev => ({ ...prev, twitter: false }));
     }
