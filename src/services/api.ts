@@ -1,15 +1,20 @@
 import axios from 'axios';
 
 const api = axios.create({
-  // In production, this should point to your deployed backend URL
   baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
-  withCredentials: true
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json'
+  }
 });
 
 export const auth = {
   getTwitterAuthUrl: () => api.get('/auth/twitter'),
+  getTwitterCallback: (params: URLSearchParams) => 
+    api.get(`/auth/twitter/callback?${params.toString()}`),
   getInstagramAuthUrl: () => api.get('/auth/instagram'),
-  getFacebookAuthUrl: () => api.get('/auth/facebook')
+  getFacebookAuthUrl: () => api.get('/auth/facebook'),
+  getConnectedAccounts: () => api.get('/auth/accounts')
 };
 
 export const posts = {
