@@ -38,11 +38,12 @@ router.get('/twitter', asyncHandler(async (req, res) => {
 
   const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
 
-  // Store tokens in session
+  // Store tokens in session and force immediate save
   req.session.oauth_token = oauth_token;
   req.session.oauth_token_secret = oauth_token_secret;
+  req.session.touch(); // Mark session as modified
 
-  // Force session save and wait for completion
+  // Force session save before continuing
   await new Promise((resolve, reject) => {
     req.session.save((err) => {
       if (err) {
@@ -51,14 +52,16 @@ router.get('/twitter', asyncHandler(async (req, res) => {
       } else {
         console.log('Session saved successfully:', {
           id: req.sessionID,
-          hasToken: !!oauth_token,
-          hasSecret: !!oauth_token_secret
+          hasToken: !!req.session.oauth_token,
+          hasSecret: !!req.session.oauth_token_secret
         });
         resolve();
       }
     });
   });
 
+  // Set a cookie header explicitly
+  res.set('Set-Cookie', req.sessionID);
   res.json({ url });
 }));
 
@@ -125,12 +128,13 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
 
     // Update session
     req.session.userId = user._id;
+    req.session.touch(); // Mark session as modified
     
     // Clear OAuth tokens
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
-    // Force session save and wait for completion
+    // Force session save before redirect
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -147,6 +151,8 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
       });
     });
 
+    // Set cookie header explicitly and redirect
+    res.set('Set-Cookie', req.sessionID);
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
     console.error('Twitter login error:', error);
