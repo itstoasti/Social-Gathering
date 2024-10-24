@@ -37,31 +37,30 @@ const startServer = async () => {
       }
     });
 
-    // CORS configuration - MUST come before session middleware
+    // Session middleware configuration
+    app.use(session({
+      secret: process.env.SESSION_SECRET,
+      name: 'social.sid',
+      resave: true, // Changed to true to ensure session is saved
+      saveUninitialized: true, // Changed to true to maintain session
+      store: sessionStore,
+      proxy: true,
+      cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
+      }
+    }));
+
+    // CORS configuration - MUST come after session middleware
     app.use(cors({
       origin: process.env.FRONTEND_URL,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
       exposedHeaders: ['Set-Cookie']
-    }));
-
-    // Session middleware configuration
-    app.use(session({
-      secret: process.env.SESSION_SECRET,
-      name: 'social.sid',
-      resave: false,
-      saveUninitialized: false,
-      store: sessionStore,
-      proxy: true,
-      cookie: {
-        secure: true, // Always use secure cookies
-        httpOnly: true,
-        sameSite: 'none', // Required for cross-site cookies
-        maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        path: '/',
-        domain: '.onrender.com' // Allow cookies across subdomains
-      }
     }));
 
     // Debug middleware for development
