@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.js';
 import postRoutes from './routes/posts.js';
 import { connectDB } from './config/db.js';
 
+// Load environment variables first
 dotenv.config();
 
 const app = express();
@@ -18,12 +19,9 @@ const startServer = async () => {
     // Connect to MongoDB
     await connectDB();
 
-    // Session store setup
-    const sessionStore = MongoStore.create({
-      mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/social-crosspost',
-      ttl: 24 * 60 * 60,
-      touchAfter: 24 * 3600
-    });
+    // Basic middleware
+    app.use(express.json());
+    app.use(express.urlencoded({ extended: true }));
 
     // CORS configuration
     app.use(cors({
@@ -36,7 +34,12 @@ const startServer = async () => {
       exposedHeaders: ['set-cookie']
     }));
 
-    app.use(express.json());
+    // Session store setup
+    const sessionStore = MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI,
+      ttl: 24 * 60 * 60,
+      touchAfter: 24 * 3600
+    });
 
     // Session configuration
     app.use(session({
@@ -48,22 +51,14 @@ const startServer = async () => {
         secure: process.env.NODE_ENV === 'production',
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
-        httpOnly: true,
-        domain: process.env.NODE_ENV === 'production' ? '.render.com' : undefined
+        httpOnly: true
       },
       name: 'social.sid'
     }));
 
     // Request logging middleware
     app.use((req, res, next) => {
-      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`, {
-        sessionID: req.sessionID,
-        cookies: req.cookies,
-        headers: {
-          origin: req.headers.origin,
-          referer: req.headers.referer
-        }
-      });
+      console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
       next();
     });
 
@@ -72,7 +67,7 @@ const startServer = async () => {
     app.use('/api/posts', postRoutes);
 
     // Health check endpoint
-    app.get('/health', (req, res) => {
+    app.get('/api/health', (req, res) => {
       res.status(200).json({ 
         status: 'ok',
         timestamp: new Date().toISOString(),
@@ -80,25 +75,20 @@ const startServer = async () => {
       });
     });
 
-    // Global error handling middleware
+    // Error handling middleware
     app.use((err, req, res, next) => {
-      console.error('Server Error:', {
-        message: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-        path: req.path,
-        method: req.method
-      });
-
+      console.error('Server Error:', err);
       res.status(err.status || 500).json({
         message: err.message || 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? err : undefined
+        error: process.env.NODE_ENV === 'development' ? err : {}
       });
     });
 
     // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-      console.log(`Health check available at http://localhost:${PORT}/health`);
+      console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
+      console.log(`Backend URL: ${process.env.BASE_URL}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
@@ -107,4 +97,7 @@ const startServer = async () => {
 };
 
 // Start the server
-startServer();
+startServer().catch(error => {
+  console.error('Server startup failed:', error);
+  process.exit(1);
+});
