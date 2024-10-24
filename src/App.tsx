@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Calendar, Image, Video, Send, Clock, X, Instagram, Facebook } from 'lucide-react';
 import SocialLogin from './components/SocialLogin';
-import MediaUpload from './components/MediaUpload';
+import PostEditor from './components/PostEditor';
 import PostScheduler from './components/PostScheduler';
+import { posts } from './services/api';
 
 function App() {
   const [caption, setCaption] = useState('');
@@ -14,23 +15,77 @@ function App() {
   const [isScheduling, setIsScheduling] = useState(false);
   const [scheduledTime, setScheduledTime] = useState('');
   const [mediaFile, setMediaFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [mediaPreview, setMediaPreview] = useState<string | null>(null);
+  const [mediaType, setMediaType] = useState<'image' | 'video' | null>(null);
+  const [isPosting, setIsPosting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleMediaSelect = (file: File) => {
     setMediaFile(file);
     const reader = new FileReader();
     reader.onloadend = () => {
-      setPreview(reader.result as string);
+      setMediaPreview(reader.result as string);
+      setMediaType(file.type.startsWith('image/') ? 'image' : 'video');
     };
     reader.readAsDataURL(file);
   };
 
-  const handlePost = () => {
-    // In a real app, this would handle the API calls to each platform
-    console.log('Posting to platforms:', selectedPlatforms);
-    console.log('Caption:', caption);
-    console.log('Media:', mediaFile);
-    console.log('Scheduled time:', scheduledTime);
+  const handleMediaRemove = () => {
+    setMediaFile(null);
+    setMediaPreview(null);
+    setMediaType(null);
+  };
+
+  const handlePost = async () => {
+    try {
+      if (!caption) {
+        setError('Please enter a caption for your post.');
+        return;
+      }
+
+      if (!Object.values(selectedPlatforms).some(v => v)) {
+        setError('Please select at least one platform to post to.');
+        return;
+      }
+
+      setIsPosting(true);
+      setError(null);
+
+      // Convert media file to URL if exists
+      let mediaUrl = null;
+      if (mediaFile) {
+        // In a real app, you would upload the file to a storage service
+        // and get back a URL. For now, we'll use the data URL
+        mediaUrl = mediaPreview;
+      }
+
+      const postData = {
+        caption,
+        mediaUrl,
+        platforms: selectedPlatforms,
+        scheduledFor: scheduledTime ? new Date(scheduledTime) : undefined
+      };
+
+      const response = await posts.create(postData);
+      console.log('Post created:', response);
+
+      // Clear form
+      setCaption('');
+      setMediaFile(null);
+      setMediaPreview(null);
+      setMediaType(null);
+      setScheduledTime('');
+      setIsScheduling(false);
+      setError(null);
+
+      // Show success message
+      alert(scheduledTime ? 'Post scheduled successfully!' : 'Post created successfully!');
+    } catch (err: any) {
+      console.error('Failed to create post:', err);
+      setError(err.message || 'Failed to create post. Please try again.');
+    } finally {
+      setIsPosting(false);
+    }
   };
 
   return (
@@ -42,35 +97,19 @@ function App() {
         </header>
 
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <div className="mb-6">
-            <textarea
-              className="w-full p-4 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-              rows={4}
-              placeholder="What's on your mind?"
-              value={caption}
-              onChange={(e) => setCaption(e.target.value)}
-            />
-          </div>
+          <PostEditor
+            caption={caption}
+            setCaption={setCaption}
+            mediaPreview={mediaPreview}
+            mediaType={mediaType}
+            onMediaUpload={(e) => {
+              const file = e.target.files?.[0];
+              if (file) handleMediaSelect(file);
+            }}
+            onMediaRemove={handleMediaRemove}
+          />
 
-          <div className="mb-6">
-            <MediaUpload onFileSelect={handleMediaSelect} />
-            {preview && (
-              <div className="relative mt-4 inline-block">
-                <img src={preview} alt="Preview" className="max-h-48 rounded-lg" />
-                <button
-                  onClick={() => {
-                    setPreview(null);
-                    setMediaFile(null);
-                  }}
-                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap gap-4 mb-6">
+          <div className="flex flex-wrap gap-4 my-6">
             <button
               onClick={() => setSelectedPlatforms(prev => ({ ...prev, twitter: !prev.twitter }))}
               className={`flex items-center gap-2 px-4 py-2 rounded-full ${
@@ -106,6 +145,12 @@ function App() {
             </button>
           </div>
 
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+              {error}
+            </div>
+          )}
+
           <div className="flex justify-between items-center">
             <button
               onClick={() => setIsScheduling(!isScheduling)}
@@ -116,11 +161,20 @@ function App() {
             </button>
             <button
               onClick={handlePost}
-              className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-2 rounded-full hover:opacity-90 transition-opacity flex items-center gap-2"
-              disabled={!caption || Object.values(selectedPlatforms).every(v => !v)}
+              disabled={isPosting || !caption || !Object.values(selectedPlatforms).some(v => v)}
+              className="bg-gradient-to-r from-blue-500 to-purple-500 text-white px-6 py-2 rounded-full hover:opacity-90 transition-opacity flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <Send size={18} />
-              {isScheduling ? 'Schedule Post' : 'Post Now'}
+              {isPosting ? (
+                <>
+                  <span className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                  {isScheduling ? 'Scheduling...' : 'Posting...'}
+                </>
+              ) : (
+                <>
+                  <Send size={18} />
+                  {isScheduling ? 'Schedule Post' : 'Post Now'}
+                </>
+              )}
             </button>
           </div>
 
