@@ -31,30 +31,33 @@ const startServer = async () => {
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
-      touchAfter: 0,
-      stringify: false
+      touchAfter: 0, // Always update on session changes
+      stringify: false,
+      crypto: {
+        secret: process.env.SESSION_SECRET
+      }
     });
 
     // Session middleware with production-ready settings
-    const sessionConfig = {
+    app.use(session({
       name: 'social.sid',
       secret: process.env.SESSION_SECRET,
-      resave: false,
-      saveUninitialized: false,
+      resave: true, // Changed to true to ensure session is saved
+      saveUninitialized: true, // Changed to true to ensure new sessions are saved
       store: sessionStore,
       proxy: true,
+      rolling: true, // Refresh session with each request
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
+        path: '/',
         domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
       }
-    };
+    }));
 
-    app.use(session(sessionConfig));
-
-    // CORS configuration
+    // CORS configuration - MUST come after session middleware
     app.use(cors({
       origin: process.env.FRONTEND_URL,
       credentials: true,
