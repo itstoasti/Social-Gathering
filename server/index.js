@@ -31,48 +31,44 @@ const startServer = async () => {
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
-      touchAfter: 24 * 3600,
-      crypto: {
-        secret: process.env.SESSION_SECRET
-      }
+      touchAfter: 24 * 3600
     });
 
-    // Session middleware - MUST come before CORS
+    // Session middleware configuration - MUST come before CORS
     app.use(session({
       secret: process.env.SESSION_SECRET,
       name: 'social.sid',
       resave: false,
       saveUninitialized: false,
       store: sessionStore,
+      proxy: true, // Important for secure cookies behind proxy
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000,
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
-        path: '/'
+        maxAge: 24 * 60 * 60 * 1000, // 24 hours
+        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
       }
     }));
 
     // CORS configuration - MUST come after session middleware
     app.use(cors({
-      origin: process.env.NODE_ENV === 'production'
-        ? [process.env.FRONTEND_URL]
-        : ['http://localhost:5173'],
+      origin: process.env.NODE_ENV === 'production' 
+        ? process.env.FRONTEND_URL 
+        : 'http://localhost:5173',
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
       exposedHeaders: ['set-cookie']
     }));
 
-    // Session debugging middleware
+    // Debug middleware for development
     if (process.env.NODE_ENV === 'development') {
       app.use((req, res, next) => {
-        console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
         console.log('Session:', {
           id: req.sessionID,
-          userId: req.session.userId,
-          oauthTokens: !!req.session.oauthTokens
+          cookie: req.session.cookie,
+          oauth: !!req.session.oauthTokens
         });
         next();
       });
@@ -82,16 +78,16 @@ const startServer = async () => {
     app.use('/api/auth', authRoutes);
     app.use('/api/posts', postRoutes);
 
-    // Health check
+    // Health check endpoint
     app.get('/api/health', (req, res) => {
-      res.status(200).json({
+      res.status(200).json({ 
         status: 'ok',
-        timestamp: new Date().toISOString(),
-        env: process.env.NODE_ENV
+        env: process.env.NODE_ENV,
+        session: !!req.session
       });
     });
 
-    // Error handling
+    // Error handling middleware
     app.use((err, req, res, next) => {
       console.error('Server Error:', err);
       res.status(err.status || 500).json({
@@ -103,8 +99,6 @@ const startServer = async () => {
     // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
-      console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
-      console.log(`Backend URL: ${process.env.BASE_URL}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
