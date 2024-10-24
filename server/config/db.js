@@ -4,20 +4,19 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/social-crosspost';
-const CONNECT_TIMEOUT = 5000;
 
 export const connectDB = async () => {
   try {
     console.log('Connecting to MongoDB...');
     
     await mongoose.connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: CONNECT_TIMEOUT,
-      heartbeatFrequencyMS: 1000,
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      family: 4 // Force IPv4
     });
 
     console.log('MongoDB connected successfully');
 
-    // Handle connection events
     mongoose.connection.on('error', (err) => {
       console.error('MongoDB connection error:', err);
     });
@@ -30,8 +29,9 @@ export const connectDB = async () => {
       console.log('MongoDB reconnected successfully');
     });
 
+    return mongoose.connection;
   } catch (error) {
     console.error('MongoDB connection error:', error);
-    process.exit(1);
+    throw error;
   }
 };
