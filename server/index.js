@@ -46,32 +46,31 @@ const startServer = async () => {
     }));
 
     // Session store setup
-    const sessionStore = MongoStore.create({
+    const mongoStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
-      ttl: 24 * 60 * 60,
+      ttl: 24 * 60 * 60, // 1 day
       autoRemove: 'native',
-      touchAfter: 0,
-      stringify: false
+      touchAfter: 24 * 3600, // 24 hours
+      crypto: {
+        secret: process.env.SESSION_SECRET
+      }
     });
 
     // Session configuration
-    const sessionConfig = {
+    app.use(session({
       name: 'social.sid',
       secret: process.env.SESSION_SECRET,
       resave: false,
       saveUninitialized: false,
-      store: sessionStore,
-      proxy: true,
+      store: mongoStore,
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
-        maxAge: 24 * 60 * 60 * 1000
+        maxAge: 24 * 60 * 60 * 1000 // 1 day
       }
-    };
-
-    app.use(session(sessionConfig));
+    }));
 
     // Debug middleware
     app.use((req, res, next) => {
@@ -79,11 +78,9 @@ const startServer = async () => {
         method: req.method,
         path: req.path,
         origin: req.headers.origin,
-        cookies: req.cookies,
-        session: {
-          id: req.sessionID,
-          userId: req.session?.userId
-        }
+        sessionID: req.sessionID,
+        userId: req.session?.userId,
+        cookie: req.session?.cookie
       });
 
       // Add CORS headers for preflight requests
@@ -97,6 +94,20 @@ const startServer = async () => {
       next();
     });
 
+    // Session error handler
+    app.use((err, req, res, next) => {
+      if (err.name === 'MongooseError') {
+        console.error('MongoDB Session Error:', err);
+        // Reset session if there's an error
+        req.session.destroy((destroyErr) => {
+          if (destroyErr) {
+            console.error('Failed to destroy session:', destroyErr);
+          }
+        });
+      }
+      next(err);
+    });
+
     // Routes
     app.use('/api/auth', authRoutes);
     app.use('/api/posts', postRoutes);
@@ -108,19 +119,32 @@ const startServer = async () => {
         env: process.env.NODE_ENV,
         session: {
           id: req.sessionID,
-          active: !!req.session
+          active: !!req.session,
+          cookie: req.session?.cookie
         }
       });
     });
 
     // Error handling middleware
     app.use((err, req, res, next) => {
-      console.error('Server Error:', err);
+      console.error('Server Error:', {
+        name: err.name,
+        message: err.message,
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+      });
       
       // Handle CORS errors
       if (err.message === 'Not allowed by CORS') {
         return res.status(403).json({
           message: 'Origin not allowed',
+          error: process.env.NODE_ENV === 'development' ? err.message : {}
+        });
+      }
+
+      // Handle session errors
+      if (err.name === 'MongooseError' || err.name === 'MongoError') {
+        return res.status(500).json({
+          message: 'Session error occurred',
           error: process.env.NODE_ENV === 'development' ? err.message : {}
         });
       }
