@@ -24,11 +24,42 @@ const startServer = async () => {
     // Trust proxy for secure cookies
     app.set('trust proxy', 1);
 
-    // CORS configuration - Must be before session middleware
+    // Session store setup
+    const mongoStore = MongoStore.create({
+      mongoUrl: process.env.MONGODB_URI,
+      ttl: parseInt(process.env.SESSION_TTL) || 86400,
+      autoRemove: 'native',
+      touchAfter: parseInt(process.env.SESSION_TOUCH_AFTER) || 86400,
+      crypto: {
+        secret: process.env.SESSION_SECRET
+      },
+      collectionName: 'sessions'
+    });
+
+    // Session configuration
+    const sessionConfig = {
+      name: process.env.SESSION_NAME || 'social.sid',
+      secret: process.env.SESSION_SECRET,
+      resave: false,
+      saveUninitialized: false,
+      store: mongoStore,
+      proxy: true,
+      cookie: {
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        domain: process.env.NODE_ENV === 'production' ? process.env.COOKIE_DOMAIN : undefined,
+        maxAge: parseInt(process.env.COOKIE_MAX_AGE) || 86400000
+      }
+    };
+
+    app.use(session(sessionConfig));
+
+    // CORS configuration - Must be after session middleware
     app.use(cors({
       origin: (origin, callback) => {
         const allowedOrigins = [
-          'https://social-crosspost-frontend.onrender.com',
+          process.env.FRONTEND_URL,
           'http://localhost:5173',
           'https://localhost:5173'
         ];
@@ -43,33 +74,6 @@ const startServer = async () => {
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],
       exposedHeaders: ['set-cookie']
-    }));
-
-    // Session store setup
-    const mongoStore = MongoStore.create({
-      mongoUrl: process.env.MONGODB_URI,
-      ttl: 24 * 60 * 60, // 1 day
-      autoRemove: 'native',
-      touchAfter: 24 * 3600, // 24 hours
-      crypto: {
-        secret: process.env.SESSION_SECRET
-      }
-    });
-
-    // Session configuration
-    app.use(session({
-      name: 'social.sid',
-      secret: process.env.SESSION_SECRET,
-      resave: false,
-      saveUninitialized: false,
-      store: mongoStore,
-      cookie: {
-        secure: process.env.NODE_ENV === 'production',
-        httpOnly: true,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
-        maxAge: 24 * 60 * 60 * 1000 // 1 day
-      }
     }));
 
     // Debug middleware
@@ -92,20 +96,6 @@ const startServer = async () => {
       }
 
       next();
-    });
-
-    // Session error handler
-    app.use((err, req, res, next) => {
-      if (err.name === 'MongooseError') {
-        console.error('MongoDB Session Error:', err);
-        // Reset session if there's an error
-        req.session.destroy((destroyErr) => {
-          if (destroyErr) {
-            console.error('Failed to destroy session:', destroyErr);
-          }
-        });
-      }
-      next(err);
     });
 
     // Routes
