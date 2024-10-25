@@ -11,7 +11,9 @@ const asyncHandler = (fn) => (req, res, next) => {
     console.error('Route Error:', {
       name: error.name,
       message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+      sessionID: req.sessionID,
+      session: req.session
     });
 
     // Handle specific error types
@@ -57,7 +59,9 @@ router.get('/twitter', asyncHandler(async (req, res) => {
     const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
     console.log('Twitter callback URL:', callbackUrl);
     
-    const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
+    const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl, {
+      linkMode: 'authorize'
+    });
 
     // Store tokens in session
     req.session.oauth_token = oauth_token;
@@ -72,7 +76,8 @@ router.get('/twitter', asyncHandler(async (req, res) => {
         } else {
           console.log('Session saved successfully:', {
             sessionID: req.sessionID,
-            hasOAuthToken: !!oauth_token
+            hasOAuthToken: !!oauth_token,
+            session: req.session
           });
           resolve();
         }
@@ -96,7 +101,8 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
       hasOAuthToken: !!oauth_token,
       hasVerifier: !!oauth_verifier,
       hasSecret: !!oauth_token_secret,
-      sessionID: req.sessionID
+      sessionID: req.sessionID,
+      session: req.session
     });
 
     if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
@@ -152,7 +158,8 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
         } else {
           console.log('Session saved successfully:', {
             sessionID: req.sessionID,
-            userId: user._id
+            userId: user._id,
+            session: req.session
           });
           resolve();
         }
@@ -188,19 +195,20 @@ router.get('/instagram', asyncHandler(async (req, res) => {
 // Instagram OAuth callback
 router.get('/instagram/callback', asyncHandler(async (req, res) => {
   try {
+    const { code } = req.query;
     console.log('Instagram callback received:', {
       code: req.query.code ? 'present' : 'missing',
       error: req.query.error,
       errorReason: req.query.error_reason,
-      errorDescription: req.query.error_description
+      errorDescription: req.query.error_description,
+      session: req.session
     });
-
-    const { code } = req.query;
-    const redirectUri = process.env.IG_REDIRECT_URI;
 
     if (!code) {
       throw new Error('No authorization code received');
     }
+
+    const redirectUri = process.env.IG_REDIRECT_URI;
 
     // Exchange code for access token
     const tokenResponse = await axios.post('https://api.instagram.com/oauth/access_token', 
@@ -279,7 +287,8 @@ router.get('/instagram/callback', asyncHandler(async (req, res) => {
         } else {
           console.log('Session saved successfully:', {
             sessionID: req.sessionID,
-            userId: user._id
+            userId: user._id,
+            session: req.session
           });
           resolve();
         }
@@ -391,7 +400,8 @@ router.get('/status', (req, res) => {
     console.log('Auth status check:', {
       sessionID: req.sessionID,
       userId: req.session?.userId,
-      authenticated: !!req.session?.userId
+      authenticated: !!req.session?.userId,
+      session: req.session
     });
     
     res.json({
