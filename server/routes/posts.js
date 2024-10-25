@@ -1,5 +1,6 @@
 import express from 'express';
 import { TwitterApi } from 'twitter-api-v2';
+import axios from 'axios';
 import Post from '../models/Post.js';
 import User from '../models/User.js';
 
@@ -16,16 +17,75 @@ const asyncHandler = (fn) => (req, res, next) => {
   });
 };
 
+// Get user's posts
+router.get('/', asyncHandler(async (req, res) => {
+  const userId = req.session.userId;
+  
+  if (!userId) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  const posts = await Post.find({ user: userId })
+    .sort({ scheduledFor: 1, createdAt: -1 })
+    .limit(50);
+
+  res.json(posts);
+}));
+
+// Delete a post
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const userId = req.session.userId;
+  const postId = req.params.id;
+  
+  if (!userId) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  const post = await Post.findOne({ _id: postId, user: userId });
+  
+  if (!post) {
+    return res.status(404).json({ message: 'Post not found' });
+  }
+
+  if (post.status !== 'pending') {
+    return res.status(400).json({ message: 'Only pending posts can be deleted' });
+  }
+
+  await post.deleteOne();
+  res.json({ message: 'Post deleted successfully' });
+}));
+
+// Update a scheduled post
+router.put('/:id', asyncHandler(async (req, res) => {
+  const userId = req.session.userId;
+  const postId = req.params.id;
+  const { caption, platforms, scheduledFor } = req.body;
+  
+  if (!userId) {
+    return res.status(401).json({ message: 'Not authenticated' });
+  }
+
+  const post = await Post.findOne({ _id: postId, user: userId });
+  
+  if (!post) {
+    return res.status(404).json({ message: 'Post not found' });
+  }
+
+  if (post.status !== 'pending') {
+    return res.status(400).json({ message: 'Only pending posts can be updated' });
+  }
+
+  // Update fields
+  if (caption) post.caption = caption;
+  if (platforms) post.platforms = platforms;
+  if (scheduledFor) post.scheduledFor = new Date(scheduledFor);
+
+  await post.save();
+  res.json(post);
+}));
+
 // Create a new post
 router.post('/', asyncHandler(async (req, res) => {
-  console.log('Creating post:', {
-    body: req.body,
-    session: {
-      id: req.sessionID,
-      userId: req.session.userId
-    }
-  });
-
   const { caption, mediaUrl, platforms, scheduledFor } = req.body;
   const userId = req.session.userId;
 
@@ -46,37 +106,6 @@ router.post('/', asyncHandler(async (req, res) => {
     return res.status(404).json({ message: 'User not found' });
   }
 
-  // Validate Twitter credentials before proceeding
-  if (platforms.twitter) {
-    if (!user.socialAccounts?.twitter?.accessToken || !user.socialAccounts?.twitter?.accessSecret) {
-      return res.status(400).json({ message: 'Twitter account not properly connected. Please reconnect your account.' });
-    }
-
-    try {
-      // Verify Twitter credentials
-      const client = new TwitterApi({
-        appKey: process.env.TWITTER_API_KEY,
-        appSecret: process.env.TWITTER_API_SECRET,
-        accessToken: user.socialAccounts.twitter.accessToken,
-        accessSecret: user.socialAccounts.twitter.accessSecret
-      });
-
-      // Test the credentials by getting user info
-      await client.v2.me();
-    } catch (error) {
-      console.error('Twitter credentials validation failed:', error);
-      
-      // If credentials are invalid, clear them and ask user to reconnect
-      user.socialAccounts.twitter = undefined;
-      await user.save();
-      
-      return res.status(401).json({ 
-        message: 'Twitter authentication expired. Please reconnect your account.',
-        code: 'TWITTER_AUTH_EXPIRED'
-      });
-    }
-  }
-
   // Create post document
   const post = new Post({
     user: userId,
@@ -88,7 +117,6 @@ router.post('/', asyncHandler(async (req, res) => {
   });
 
   await post.save();
-  console.log('Post saved:', post._id);
 
   // If no scheduling, post immediately
   if (!scheduledFor) {
@@ -107,21 +135,6 @@ router.post('/', asyncHandler(async (req, res) => {
   res.status(201).json(post);
 }));
 
-// Get user's posts
-router.get('/', asyncHandler(async (req, res) => {
-  const userId = req.session.userId;
-  
-  if (!userId) {
-    return res.status(401).json({ message: 'Not authenticated' });
-  }
-
-  const posts = await Post.find({ user: userId })
-    .sort({ createdAt: -1 })
-    .limit(50);
-
-  res.json(posts);
-}));
-
 async function publishPost(post, user) {
   const errors = [];
 
@@ -130,16 +143,21 @@ async function publishPost(post, user) {
       await publishToTwitter(post, user.socialAccounts.twitter);
     } catch (error) {
       console.error('Twitter publishing error:', error);
-      
-      // Check if it's an auth error
-      if (error.code === 401 || error.code === 403) {
-        throw new Error('Twitter authentication expired. Please reconnect your account.');
-      }
-      
       errors.push({
         platform: 'twitter',
-        error: error.message,
-        code: error.code
+        error: error.message
+      });
+    }
+  }
+
+  if (post.platforms.instagram && user.socialAccounts?.instagram?.accessToken) {
+    try {
+      await publishToInstagram(post, user.socialAccounts.instagram);
+    } catch (error) {
+      console.error('Instagram publishing error:', error);
+      errors.push({
+        platform: 'instagram',
+        error: error.message
       });
     }
   }
@@ -150,12 +168,6 @@ async function publishPost(post, user) {
 }
 
 async function publishToTwitter(post, twitterAccount) {
-  console.log('Publishing to Twitter:', {
-    hasCaption: !!post.caption,
-    hasMedia: !!post.mediaUrl,
-    username: twitterAccount.username
-  });
-
   if (!twitterAccount.accessToken || !twitterAccount.accessSecret) {
     throw new Error('Twitter credentials missing');
   }
@@ -168,11 +180,7 @@ async function publishToTwitter(post, twitterAccount) {
   });
 
   try {
-    // Verify credentials first
-    await client.v2.me();
-
     if (post.mediaUrl) {
-      // For base64 images
       if (post.mediaUrl.startsWith('data:')) {
         const base64Data = post.mediaUrl.split(',')[1];
         const buffer = Buffer.from(base64Data, 'base64');
@@ -182,7 +190,6 @@ async function publishToTwitter(post, twitterAccount) {
           media: { media_ids: [mediaId] }
         });
       } else {
-        // For regular URLs
         const mediaId = await client.v1.uploadMedia(post.mediaUrl);
         await client.v2.tweet({
           text: post.caption || '',
@@ -192,18 +199,46 @@ async function publishToTwitter(post, twitterAccount) {
     } else {
       await client.v2.tweet(post.caption);
     }
-
-    console.log('Successfully published to Twitter');
   } catch (error) {
-    console.error('Twitter API error:', error);
-    
-    // Enhanced error handling
     if (error.code === 401 || error.code === 403) {
       throw new Error('Twitter authentication expired. Please reconnect your account.');
     } else if (error.code === 429) {
       throw new Error('Twitter rate limit exceeded. Please try again later.');
     } else {
       throw new Error(`Twitter API error: ${error.message}`);
+    }
+  }
+}
+
+async function publishToInstagram(post, instagramAccount) {
+  if (!instagramAccount.accessToken) {
+    throw new Error('Instagram credentials missing');
+  }
+
+  try {
+    const containerResponse = await axios.post(
+      `https://graph.instagram.com/me/media`,
+      {
+        image_url: post.mediaUrl,
+        caption: post.caption,
+        access_token: instagramAccount.accessToken
+      }
+    );
+
+    const containerId = containerResponse.data.id;
+
+    await axios.post(
+      `https://graph.instagram.com/me/media_publish`,
+      {
+        creation_id: containerId,
+        access_token: instagramAccount.accessToken
+      }
+    );
+  } catch (error) {
+    if (error.response?.status === 401) {
+      throw new Error('Instagram authentication expired. Please reconnect your account.');
+    } else {
+      throw new Error(`Instagram API error: ${error.message}`);
     }
   }
 }
@@ -222,6 +257,7 @@ setInterval(async () => {
         await publishPost(post, post.user);
         post.status = 'published';
         await post.save();
+        console.log(`Successfully published scheduled post ${post._id}`);
       } catch (error) {
         console.error(`Failed to publish scheduled post ${post._id}:`, error);
         post.status = 'failed';
