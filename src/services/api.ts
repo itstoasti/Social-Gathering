@@ -1,6 +1,6 @@
 import axios, { AxiosError } from 'axios';
 
-const baseURL = process.env.NODE_ENV === 'production' 
+const baseURL = import.meta.env.PROD 
   ? 'https://social-gathering.onrender.com/api'
   : 'http://localhost:5000/api';
 
@@ -21,24 +21,20 @@ const api = axios.create({
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
-  },
-  // Ensure cookies are sent
-  xsrfCookieName: 'XSRF-TOKEN',
-  xsrfHeaderName: 'X-XSRF-TOKEN'
+  }
 });
 
 // Add request interceptor
 api.interceptors.request.use(
   (config) => {
-    // Ensure withCredentials is always true
-    config.withCredentials = true;
-    
+    // Log request details
     console.log('API Request:', {
       method: config.method,
       url: config.url,
       baseURL: config.baseURL,
       headers: config.headers,
-      withCredentials: config.withCredentials
+      withCredentials: config.withCredentials,
+      data: config.data
     });
     return config;
   },
@@ -65,11 +61,22 @@ api.interceptors.response.use(
       message: error.message,
       headers: error.response?.headers
     });
-    return Promise.reject(new ApiError(
+
+    // Handle network errors
+    if (!error.response) {
+      throw new ApiError(
+        'Network Error - Please check your connection',
+        0,
+        error
+      );
+    }
+
+    // Handle API errors
+    throw new ApiError(
       error.response?.data?.message || error.message,
       error.response?.status,
       error.response?.data
-    ));
+    );
   }
 );
 
@@ -105,13 +112,27 @@ export interface Post extends CreatePostData {
 }
 
 export const auth = {
-  getTwitterAuthUrl: () => 
-    api.get<{ url: string }>('/auth/twitter')
-      .then(response => response.data),
+  getTwitterAuthUrl: async () => {
+    try {
+      const response = await api.get<{ url: string }>('/auth/twitter');
+      window.location.href = response.data.url;
+      return response.data;
+    } catch (error) {
+      console.error('Twitter auth error:', error);
+      throw error;
+    }
+  },
       
-  getInstagramAuthUrl: () => 
-    api.get<{ url: string }>('/auth/instagram')
-      .then(response => response.data),
+  getInstagramAuthUrl: async () => {
+    try {
+      const response = await api.get<{ url: string }>('/auth/instagram');
+      window.location.href = response.data.url;
+      return response.data;
+    } catch (error) {
+      console.error('Instagram auth error:', error);
+      throw error;
+    }
+  },
       
   getFacebookAuthUrl: () => 
     api.get<{ url: string }>('/auth/facebook')
