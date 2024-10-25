@@ -26,38 +26,37 @@ const startServer = async () => {
       app.set('trust proxy', 1);
     }
 
-    // Session store setup
+    // Session store setup with enhanced security
     const sessionStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
-      touchAfter: 0, // Always update on session changes
+      touchAfter: 0,
       stringify: false,
       crypto: {
         secret: process.env.SESSION_SECRET
       }
     });
 
-    // Session middleware with production-ready settings
+    // Enhanced session configuration
     app.use(session({
       name: 'social.sid',
       secret: process.env.SESSION_SECRET,
-      resave: true, // Changed to true to ensure session is saved
-      saveUninitialized: true, // Changed to true to ensure new sessions are saved
+      resave: true,
+      saveUninitialized: true,
       store: sessionStore,
       proxy: true,
-      rolling: true, // Refresh session with each request
+      rolling: true,
       cookie: {
         secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
-        path: '/',
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined
+        path: '/'
       }
     }));
 
-    // CORS configuration - MUST come after session middleware
+    // CORS configuration with credentials
     app.use(cors({
       origin: process.env.FRONTEND_URL,
       credentials: true,
@@ -66,7 +65,7 @@ const startServer = async () => {
       exposedHeaders: ['Set-Cookie']
     }));
 
-    // Debug middleware
+    // Session debug middleware
     app.use((req, res, next) => {
       console.log('Session Debug:', {
         id: req.sessionID,
@@ -83,7 +82,7 @@ const startServer = async () => {
     app.use('/api/auth', authRoutes);
     app.use('/api/posts', postRoutes);
 
-    // Health check
+    // Health check endpoint
     app.get('/api/health', (req, res) => {
       res.status(200).json({ 
         status: 'ok',
@@ -95,7 +94,7 @@ const startServer = async () => {
       });
     });
 
-    // Error handling
+    // Error handling middleware
     app.use((err, req, res, next) => {
       console.error('Server Error:', err);
       res.status(err.status || 500).json({
