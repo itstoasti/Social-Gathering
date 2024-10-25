@@ -5,10 +5,40 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
-// Error wrapper
+// Error wrapper with improved error handling
 const asyncHandler = (fn) => (req, res, next) => {
   Promise.resolve(fn(req, res, next)).catch((error) => {
-    console.error('Route Error:', error);
+    console.error('Route Error:', {
+      name: error.name,
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+
+    // Handle specific error types
+    if (error.name === 'SyntaxError' && error.message.includes('JSON')) {
+      return res.status(400).json({
+        message: 'Invalid JSON data',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+    }
+
+    // Handle Twitter API errors
+    if (error.name === 'ApiResponseError') {
+      return res.status(error.code || 500).json({
+        message: error.message,
+        error: process.env.NODE_ENV === 'development' ? error : undefined
+      });
+    }
+
+    // Handle Axios errors
+    if (error.isAxiosError) {
+      return res.status(error.response?.status || 500).json({
+        message: error.response?.data?.message || error.message,
+        error: process.env.NODE_ENV === 'development' ? error.response?.data : undefined
+      });
+    }
+
+    // Default error response
     res.status(500).json({
       message: error.message || 'Internal server error',
       error: process.env.NODE_ENV === 'development' ? error : undefined
@@ -18,34 +48,42 @@ const asyncHandler = (fn) => (req, res, next) => {
 
 // Twitter OAuth
 router.get('/twitter', asyncHandler(async (req, res) => {
-  const client = new TwitterApi({
-    appKey: process.env.TWITTER_API_KEY,
-    appSecret: process.env.TWITTER_API_SECRET
-  });
-
-  const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
-  console.log('Twitter callback URL:', callbackUrl);
-  
-  const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
-
-  // Store tokens in session
-  req.session.oauth_token = oauth_token;
-  req.session.oauth_token_secret = oauth_token_secret;
-
-  // Force session save
-  await new Promise((resolve, reject) => {
-    req.session.save((err) => {
-      if (err) {
-        console.error('Session save error:', err);
-        reject(err);
-      } else {
-        console.log('Session saved successfully');
-        resolve();
-      }
+  try {
+    const client = new TwitterApi({
+      appKey: process.env.TWITTER_API_KEY,
+      appSecret: process.env.TWITTER_API_SECRET
     });
-  });
 
-  res.json({ url });
+    const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
+    console.log('Twitter callback URL:', callbackUrl);
+    
+    const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
+
+    // Store tokens in session
+    req.session.oauth_token = oauth_token;
+    req.session.oauth_token_secret = oauth_token_secret;
+
+    // Force session save
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          reject(err);
+        } else {
+          console.log('Session saved successfully:', {
+            sessionID: req.sessionID,
+            hasOAuthToken: !!oauth_token
+          });
+          resolve();
+        }
+      });
+    });
+
+    res.json({ url });
+  } catch (error) {
+    console.error('Twitter auth error:', error);
+    throw error;
+  }
 }));
 
 // Twitter OAuth callback
@@ -112,7 +150,10 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully');
+          console.log('Session saved successfully:', {
+            sessionID: req.sessionID,
+            userId: user._id
+          });
           resolve();
         }
       });
@@ -127,16 +168,21 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
 
 // Instagram OAuth
 router.get('/instagram', asyncHandler(async (req, res) => {
-  const redirectUri = process.env.IG_REDIRECT_URI;
-  console.log('Instagram redirect URI:', redirectUri);
-  
-  const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
-    process.env.IG_CLIENT_ID
-  }&redirect_uri=${
-    encodeURIComponent(redirectUri)
-  }&scope=user_profile,user_media&response_type=code`;
-  
-  res.json({ url: instagramAuthUrl });
+  try {
+    const redirectUri = process.env.IG_REDIRECT_URI;
+    console.log('Instagram redirect URI:', redirectUri);
+    
+    const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
+      process.env.IG_CLIENT_ID
+    }&redirect_uri=${
+      encodeURIComponent(redirectUri)
+    }&scope=user_profile,user_media&response_type=code`;
+    
+    res.json({ url: instagramAuthUrl });
+  } catch (error) {
+    console.error('Instagram auth error:', error);
+    throw error;
+  }
 }));
 
 // Instagram OAuth callback
@@ -231,7 +277,10 @@ router.get('/instagram/callback', asyncHandler(async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully');
+          console.log('Session saved successfully:', {
+            sessionID: req.sessionID,
+            userId: user._id
+          });
           resolve();
         }
       });
@@ -244,143 +293,118 @@ router.get('/instagram/callback', asyncHandler(async (req, res) => {
   }
 }));
 
-// Instagram deauthorization callback
-router.post('/instagram/deauthorize', asyncHandler(async (req, res) => {
-  try {
-    const { signed_request } = req.body;
-    
-    if (!signed_request) {
-      throw new Error('No signed request received');
-    }
-
-    // TODO: Verify signed request
-    // Remove user's Instagram credentials
-    
-    res.status(200).send('OK');
-  } catch (error) {
-    console.error('Instagram deauthorize error:', error);
-    res.status(500).json({ message: error.message });
-  }
-}));
-
-// Instagram data deletion
-router.post('/instagram/data-deletion', asyncHandler(async (req, res) => {
-  try {
-    const { signed_request } = req.body;
-    
-    if (!signed_request) {
-      throw new Error('No signed request received');
-    }
-
-    // TODO: Verify signed request
-    // Delete user's Instagram data
-    
-    res.status(200).json({
-      url: `${process.env.BASE_URL}/api/instagram/data-deletion/status`,
-      confirmation_code: 'PENDING'
-    });
-  } catch (error) {
-    console.error('Instagram data deletion error:', error);
-    res.status(500).json({ message: error.message });
-  }
-}));
-
 // Get connected accounts
 router.get('/accounts', asyncHandler(async (req, res) => {
-  const userId = req.session.userId;
-  console.log('Getting accounts for user:', userId);
-  
-  if (!userId) {
-    return res.json({
-      twitter: { connected: false },
-      instagram: { connected: false },
-      facebook: { connected: false }
-    });
-  }
-
-  const user = await User.findById(userId);
-  if (!user) {
-    return res.json({
-      twitter: { connected: false },
-      instagram: { connected: false },
-      facebook: { connected: false }
-    });
-  }
-
-  // Verify Twitter credentials
-  let twitterConnected = false;
-  let twitterUsername = null;
-
-  if (user.socialAccounts?.twitter?.accessToken) {
-    try {
-      const client = new TwitterApi({
-        appKey: process.env.TWITTER_API_KEY,
-        appSecret: process.env.TWITTER_API_SECRET,
-        accessToken: user.socialAccounts.twitter.accessToken,
-        accessSecret: user.socialAccounts.twitter.accessSecret
+  try {
+    const userId = req.session.userId;
+    console.log('Getting accounts for user:', userId);
+    
+    if (!userId) {
+      return res.json({
+        twitter: { connected: false },
+        instagram: { connected: false },
+        facebook: { connected: false }
       });
-
-      const { data } = await client.v2.me();
-      twitterConnected = true;
-      twitterUsername = data.username;
-    } catch (error) {
-      console.error('Twitter verification failed:', error);
-      user.socialAccounts.twitter = null;
-      await user.save();
     }
-  }
 
-  // Verify Instagram credentials
-  let instagramConnected = false;
-  let instagramUsername = null;
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.json({
+        twitter: { connected: false },
+        instagram: { connected: false },
+        facebook: { connected: false }
+      });
+    }
 
-  if (user.socialAccounts?.instagram?.accessToken) {
-    try {
-      const response = await axios.get(
-        `https://graph.instagram.com/me`,
-        {
-          params: {
-            fields: 'username',
-            access_token: user.socialAccounts.instagram.accessToken
+    // Verify Twitter credentials
+    let twitterConnected = false;
+    let twitterUsername = null;
+
+    if (user.socialAccounts?.twitter?.accessToken) {
+      try {
+        const client = new TwitterApi({
+          appKey: process.env.TWITTER_API_KEY,
+          appSecret: process.env.TWITTER_API_SECRET,
+          accessToken: user.socialAccounts.twitter.accessToken,
+          accessSecret: user.socialAccounts.twitter.accessSecret
+        });
+
+        const { data } = await client.v2.me();
+        twitterConnected = true;
+        twitterUsername = data.username;
+      } catch (error) {
+        console.error('Twitter verification failed:', error);
+        user.socialAccounts.twitter = null;
+        await user.save();
+      }
+    }
+
+    // Verify Instagram credentials
+    let instagramConnected = false;
+    let instagramUsername = null;
+
+    if (user.socialAccounts?.instagram?.accessToken) {
+      try {
+        const response = await axios.get(
+          `https://graph.instagram.com/me`,
+          {
+            params: {
+              fields: 'username',
+              access_token: user.socialAccounts.instagram.accessToken
+            }
           }
-        }
-      );
-      instagramConnected = true;
-      instagramUsername = response.data.username;
-    } catch (error) {
-      console.error('Instagram verification failed:', error);
-      user.socialAccounts.instagram = null;
-      await user.save();
+        );
+        instagramConnected = true;
+        instagramUsername = response.data.username;
+      } catch (error) {
+        console.error('Instagram verification failed:', error);
+        user.socialAccounts.instagram = null;
+        await user.save();
+      }
     }
-  }
 
-  res.json({
-    twitter: {
-      connected: twitterConnected,
-      username: twitterUsername
-    },
-    instagram: {
-      connected: instagramConnected,
-      username: instagramUsername
-    },
-    facebook: {
-      connected: false
-    }
-  });
+    const response = {
+      twitter: {
+        connected: twitterConnected,
+        username: twitterUsername
+      },
+      instagram: {
+        connected: instagramConnected,
+        username: instagramUsername
+      },
+      facebook: {
+        connected: false
+      }
+    };
+
+    console.log('Sending accounts response:', response);
+    res.json(response);
+  } catch (error) {
+    console.error('Get accounts error:', error);
+    throw error;
+  }
 }));
 
 // Check auth status
 router.get('/status', (req, res) => {
-  console.log('Auth status check:', {
-    sessionId: req.sessionID,
-    userId: req.session?.userId,
-    authenticated: !!req.session?.userId
-  });
-  
-  res.json({
-    authenticated: !!req.session?.userId,
-    sessionId: req.sessionID
-  });
+  try {
+    console.log('Auth status check:', {
+      sessionID: req.sessionID,
+      userId: req.session?.userId,
+      authenticated: !!req.session?.userId
+    });
+    
+    res.json({
+      authenticated: !!req.session?.userId,
+      sessionId: req.sessionID
+    });
+  } catch (error) {
+    console.error('Auth status error:', error);
+    res.status(500).json({
+      message: 'Failed to check authentication status',
+      error: process.env.NODE_ENV === 'development' ? error : undefined
+    });
+  }
 });
 
 export default router;
