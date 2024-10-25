@@ -14,7 +14,9 @@ import { connectDB } from './config/db.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Load environment variables
-dotenv.config();
+dotenv.config({
+  path: process.env.NODE_ENV === 'production' ? '.env.production' : '.env.development'
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -24,6 +26,8 @@ const startServer = async () => {
   try {
     console.log('Starting server initialization...');
     console.log('Environment:', process.env.NODE_ENV);
+    console.log('Frontend URL:', process.env.FRONTEND_URL);
+    console.log('Base URL:', process.env.BASE_URL);
     
     // Connect to MongoDB
     const dbConnection = await connectDB();
@@ -59,8 +63,8 @@ const startServer = async () => {
       cookie: {
         secure: true,
         httpOnly: true,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        domain: process.env.COOKIE_DOMAIN,
+        sameSite: 'none',
+        domain: process.env.COOKIE_DOMAIN || undefined,
         maxAge: 24 * 60 * 60 * 1000,
         path: '/'
       }
@@ -76,6 +80,9 @@ const startServer = async () => {
           'https://localhost:5173'
         ];
         
+        console.log('CORS Request from:', origin);
+        console.log('Allowed Origins:', allowedOrigins);
+        
         if (!origin || allowedOrigins.includes(origin)) {
           callback(null, true);
         } else {
@@ -89,10 +96,23 @@ const startServer = async () => {
       exposedHeaders: ['Set-Cookie']
     };
 
+    // Apply CORS middleware
     app.use(cors(corsOptions));
 
     // Pre-flight requests
     app.options('*', cors(corsOptions));
+
+    // Debug middleware
+    app.use((req, res, next) => {
+      console.log('Request:', {
+        method: req.method,
+        url: req.url,
+        origin: req.headers.origin,
+        cookie: req.headers.cookie,
+        sessionID: req.sessionID
+      });
+      next();
+    });
 
     // Routes
     app.use('/api/auth', authRoutes);
@@ -136,7 +156,7 @@ const startServer = async () => {
       });
     });
 
-    // Set up HTTPS server for development
+    // Start server based on environment
     if (process.env.NODE_ENV === 'development') {
       const certDir = path.join(__dirname, '..', 'certs');
       
