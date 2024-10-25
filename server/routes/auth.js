@@ -69,21 +69,29 @@ router.get('/twitter/callback', async (req, res) => {
     });
 
     const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
+    const twitterEmail = `${screenName}@twitter.com`;
 
-    // Create or update user
-    let user = await User.findById(req.session.userId);
+    // First try to find user by session ID
+    let user = req.session.userId ? await User.findById(req.session.userId) : null;
+
+    // If no user found by session ID, try to find by email
+    if (!user) {
+      user = await User.findOne({ email: twitterEmail });
+    }
+
+    // If still no user, create new one
     if (!user) {
       user = new User({
-        email: `${screenName}@twitter.com`,
+        email: twitterEmail,
         socialAccounts: {
           twitter: { accessToken, accessSecret, username: screenName }
         }
       });
     } else {
-      user.socialAccounts.twitter = {
-        accessToken,
-        accessSecret,
-        username: screenName
+      // Update existing user's Twitter credentials
+      user.socialAccounts = {
+        ...user.socialAccounts,
+        twitter: { accessToken, accessSecret, username: screenName }
       };
     }
 
