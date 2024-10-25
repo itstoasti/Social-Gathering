@@ -34,11 +34,11 @@ const Sidebar: React.FC<SidebarProps> = ({
       )}
 
       {/* Sidebar */}
-      <div
-        className={`fixed top-0 left-0 h-screen bg-white shadow-lg transition-all duration-300 ease-in-out z-50 
+      <aside
+        className={`fixed top-0 left-0 h-[100dvh] bg-white border-r transition-all duration-300 ease-in-out z-50 
           ${isOpen ? 'translate-x-0' : '-translate-x-full'} 
           ${isCollapsed ? 'w-16' : 'w-64'}
-          lg:translate-x-0 lg:static lg:z-0`}
+          lg:translate-x-0`}
       >
         {/* Mobile Header */}
         <div className="p-4 border-b flex justify-between items-center lg:hidden">
@@ -56,7 +56,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         {/* Desktop Header with Collapse Button */}
         <div className="hidden lg:flex items-center justify-between p-4 border-b">
           <h2 className={`text-xl font-semibold transition-opacity duration-200 ${
-            isCollapsed ? 'opacity-0 w-0' : 'opacity-100'
+            isCollapsed ? 'opacity-0 w-0 overflow-hidden' : 'opacity-100'
           }`}>
             Menu
           </h2>
@@ -84,9 +84,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                   onClick={() => onClose()}
                   title={isCollapsed ? item.label : undefined}
                 >
-                  {item.icon}
-                  <span className={`transition-opacity duration-200 ${
-                    isCollapsed ? 'opacity-0 w-0 hidden' : 'opacity-100'
+                  <span className="flex-shrink-0">{item.icon}</span>
+                  <span className={`transition-all duration-200 ${
+                    isCollapsed ? 'w-0 overflow-hidden' : 'w-auto'
                   }`}>
                     {item.label}
                   </span>
@@ -95,7 +95,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             ))}
           </ul>
         </nav>
-      </div>
+      </aside>
     </>
   );
 };
