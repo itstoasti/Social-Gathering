@@ -7,15 +7,32 @@ import crypto from 'crypto';
 
 const router = express.Router();
 
+// Debug middleware for session
+router.use((req, res, next) => {
+  console.log('Session Debug:', {
+    id: req.sessionID,
+    userId: req.session?.userId,
+    oauth: {
+      token: !!req.session?.oauth_token,
+      secret: !!req.session?.oauth_token_secret
+    }
+  });
+  next();
+});
+
 // Twitter OAuth
 router.get('/twitter', async (req, res) => {
   try {
+    console.log('Starting Twitter auth...');
+    
     const client = new TwitterApi({
       appKey: process.env.TWITTER_API_KEY,
       appSecret: process.env.TWITTER_API_SECRET
     });
 
     const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
+    console.log('Callback URL:', callbackUrl);
+    
     const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
 
     // Store tokens in session
@@ -29,11 +46,13 @@ router.get('/twitter', async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
+          console.log('Session saved successfully');
           resolve();
         }
       });
     });
 
+    console.log('Redirecting to Twitter...');
     res.json({ url });
   } catch (error) {
     console.error('Twitter auth error:', error);
@@ -44,6 +63,14 @@ router.get('/twitter', async (req, res) => {
 // Twitter OAuth callback
 router.get('/twitter/callback', async (req, res) => {
   try {
+    console.log('Twitter callback received:', {
+      query: req.query,
+      session: {
+        id: req.sessionID,
+        hasToken: !!req.session?.oauth_token_secret
+      }
+    });
+
     const { oauth_token, oauth_verifier } = req.query;
     const { oauth_token_secret } = req.session;
 
@@ -102,6 +129,7 @@ router.get('/twitter/callback', async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
+          console.log('Session saved successfully');
           resolve();
         }
       });
@@ -117,6 +145,8 @@ router.get('/twitter/callback', async (req, res) => {
 // Instagram OAuth
 router.get('/instagram', async (req, res) => {
   try {
+    console.log('Starting Instagram auth...');
+    
     const redirectUri = process.env.IG_REDIRECT_URI;
     const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
       process.env.IG_CLIENT_ID
@@ -124,6 +154,7 @@ router.get('/instagram', async (req, res) => {
       encodeURIComponent(redirectUri)
     }&scope=user_profile,user_media&response_type=code`;
     
+    console.log('Instagram Auth URL:', instagramAuthUrl);
     res.json({ url: instagramAuthUrl });
   } catch (error) {
     console.error('Instagram auth error:', error);
@@ -134,6 +165,13 @@ router.get('/instagram', async (req, res) => {
 // Instagram OAuth callback
 router.get('/instagram/callback', async (req, res) => {
   try {
+    console.log('Instagram callback received:', {
+      query: req.query,
+      session: {
+        id: req.sessionID
+      }
+    });
+
     const { code } = req.query;
     const redirectUri = process.env.IG_REDIRECT_URI;
 
@@ -191,8 +229,7 @@ router.get('/instagram/callback', async (req, res) => {
         email: `${username}@instagram.com`,
         socialAccounts: {
           instagram: { 
-            accessToken: longLivedToken,
-            userId: user_id,
+            accessToken: longLivedToken, 
             username 
           }
         }
@@ -201,8 +238,7 @@ router.get('/instagram/callback', async (req, res) => {
       user.socialAccounts = {
         ...user.socialAccounts,
         instagram: { 
-          accessToken: longLivedToken,
-          userId: user_id,
+          accessToken: longLivedToken, 
           username 
         }
       };
@@ -218,6 +254,7 @@ router.get('/instagram/callback', async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
+          console.log('Session saved successfully');
           resolve();
         }
       });
@@ -230,113 +267,7 @@ router.get('/instagram/callback', async (req, res) => {
   }
 });
 
-// Instagram Data Deletion Request
-router.post('/instagram/data-deletion', async (req, res) => {
-  try {
-    const { signed_request } = req.body;
-    
-    if (!signed_request) {
-      throw new Error('No signed request received');
-    }
-
-    // Decode and verify the signed request
-    const [encodedSig, payload] = signed_request.split('.');
-    const signature = Buffer.from(encodedSig, 'base64').toString('hex');
-    const data = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
-
-    // Verify the signature
-    const expectedSignature = crypto
-      .createHmac('sha256', process.env.IG_CLIENT_SECRET)
-      .update(payload)
-      .digest('hex');
-
-    if (signature !== expectedSignature) {
-      throw new Error('Invalid signature');
-    }
-
-    // Find user by Instagram ID
-    const user = await User.findOne({ 'socialAccounts.instagram.userId': data.user_id });
-    
-    if (user) {
-      // Delete all user's posts
-      await Post.deleteMany({ user: user._id });
-      
-      // Remove Instagram credentials
-      user.socialAccounts.instagram = null;
-      
-      // If no other social accounts are connected, delete the user
-      const hasOtherAccounts = user.socialAccounts.twitter || user.socialAccounts.facebook;
-      
-      if (!hasOtherAccounts) {
-        await User.deleteOne({ _id: user._id });
-      } else {
-        await user.save();
-      }
-    }
-
-    // Return confirmation URL as required by Instagram
-    const confirmationCode = Buffer.from(data.user_id).toString('base64');
-    const confirmationUrl = `${process.env.BASE_URL}/api/auth/instagram/data-deletion/confirm/${confirmationCode}`;
-
-    res.json({ 
-      url: confirmationUrl,
-      confirmation_code: confirmationCode
-    });
-  } catch (error) {
-    console.error('Instagram data deletion error:', error);
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Instagram Data Deletion Confirmation
-router.get('/instagram/data-deletion/confirm/:code', async (req, res) => {
-  try {
-    const { code } = req.params;
-    
-    // Verify the confirmation code
-    const userId = Buffer.from(code, 'base64').toString('utf-8');
-    
-    // Send a simple confirmation page
-    res.send(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Data Deletion Confirmed</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1">
-          <style>
-            body {
-              font-family: system-ui, -apple-system, sans-serif;
-              line-height: 1.5;
-              max-width: 600px;
-              margin: 0 auto;
-              padding: 2rem;
-              text-align: center;
-            }
-            .message {
-              margin: 2rem 0;
-              padding: 1rem;
-              border-radius: 0.5rem;
-              background-color: #f0fdf4;
-              color: #166534;
-            }
-          </style>
-        </head>
-        <body>
-          <h1>Data Deletion Confirmed</h1>
-          <div class="message">
-            Your data has been successfully deleted from our systems.
-          </div>
-          <p>Reference ID: ${code}</p>
-        </body>
-      </html>
-    `);
-  } catch (error) {
-    console.error('Data deletion confirmation error:', error);
-    res.status(500).send('Error confirming data deletion');
-  }
-});
-
-// Instagram Deauthorize Callback
+// Instagram deauthorization callback
 router.post('/instagram/deauthorize', async (req, res) => {
   try {
     const { signed_request } = req.body;
@@ -345,32 +276,74 @@ router.post('/instagram/deauthorize', async (req, res) => {
       throw new Error('No signed request received');
     }
 
-    // Decode and verify the signed request
+    // Verify signed request
     const [encodedSig, payload] = signed_request.split('.');
-    const signature = Buffer.from(encodedSig, 'base64').toString('hex');
+    const sig = Buffer.from(encodedSig, 'base64').toString('hex');
     const data = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
 
-    // Verify the signature
-    const expectedSignature = crypto
+    const expectedSig = crypto
       .createHmac('sha256', process.env.IG_CLIENT_SECRET)
       .update(payload)
       .digest('hex');
 
-    if (signature !== expectedSignature) {
+    if (sig !== expectedSig) {
       throw new Error('Invalid signature');
     }
 
     // Find and update user
     const user = await User.findOne({ 'socialAccounts.instagram.userId': data.user_id });
-    
     if (user) {
       user.socialAccounts.instagram = null;
       await user.save();
     }
 
-    res.json({ status: 'success' });
+    res.status(200).json({ message: 'Successfully deauthorized' });
   } catch (error) {
     console.error('Instagram deauthorize error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Instagram data deletion
+router.post('/instagram/data-deletion', async (req, res) => {
+  try {
+    const { signed_request } = req.body;
+    
+    if (!signed_request) {
+      throw new Error('No signed request received');
+    }
+
+    // Verify signed request
+    const [encodedSig, payload] = signed_request.split('.');
+    const sig = Buffer.from(encodedSig, 'base64').toString('hex');
+    const data = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
+
+    const expectedSig = crypto
+      .createHmac('sha256', process.env.IG_CLIENT_SECRET)
+      .update(payload)
+      .digest('hex');
+
+    if (sig !== expectedSig) {
+      throw new Error('Invalid signature');
+    }
+
+    // Delete user data
+    const user = await User.findOne({ 'socialAccounts.instagram.userId': data.user_id });
+    if (user) {
+      // Delete associated posts
+      await Post.deleteMany({ user: user._id });
+      // Delete user
+      await user.deleteOne();
+    }
+
+    // Respond with confirmation URL
+    const confirmationCode = crypto.randomBytes(32).toString('hex');
+    res.json({
+      url: `${process.env.BASE_URL}/api/auth/instagram/data-deletion/confirm/${confirmationCode}`,
+      confirmation_code: confirmationCode
+    });
+  } catch (error) {
+    console.error('Instagram data deletion error:', error);
     res.status(500).json({ message: error.message });
   }
 });
