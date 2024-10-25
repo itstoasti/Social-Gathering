@@ -7,64 +7,59 @@ const router = express.Router();
 
 // Error wrapper
 const asyncHandler = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch(next);
+  Promise.resolve(fn(req, res, next)).catch((error) => {
+    console.error('Route Error:', error);
+    res.status(500).json({
+      message: error.message || 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error : undefined
+    });
+  });
 };
 
 // Twitter OAuth
 router.get('/twitter', asyncHandler(async (req, res) => {
-  try {
-    console.log('Starting Twitter auth...');
-    
-    const client = new TwitterApi({
-      appKey: process.env.TWITTER_API_KEY,
-      appSecret: process.env.TWITTER_API_SECRET
+  const client = new TwitterApi({
+    appKey: process.env.TWITTER_API_KEY,
+    appSecret: process.env.TWITTER_API_SECRET
+  });
+
+  const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
+  console.log('Twitter callback URL:', callbackUrl);
+  
+  const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
+
+  // Store tokens in session
+  req.session.oauth_token = oauth_token;
+  req.session.oauth_token_secret = oauth_token_secret;
+
+  // Force session save
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        reject(err);
+      } else {
+        console.log('Session saved successfully');
+        resolve();
+      }
     });
+  });
 
-    const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
-    console.log('Twitter callback URL:', callbackUrl);
-    
-    const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
-
-    // Store tokens in session
-    req.session.oauth_token = oauth_token;
-    req.session.oauth_token_secret = oauth_token_secret;
-
-    // Force session save
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          reject(err);
-        } else {
-          console.log('Session saved successfully');
-          resolve();
-        }
-      });
-    });
-
-    res.json({ url });
-  } catch (error) {
-    console.error('Twitter auth error:', error);
-    res.status(500).json({ 
-      message: error.message,
-      details: process.env.NODE_ENV === 'development' ? error : undefined
-    });
-  }
+  res.json({ url });
 }));
 
 // Twitter OAuth callback
 router.get('/twitter/callback', asyncHandler(async (req, res) => {
   try {
-    console.log('Twitter callback received:', {
-      query: req.query,
-      session: {
-        id: req.sessionID,
-        hasToken: !!req.session?.oauth_token_secret
-      }
-    });
-
     const { oauth_token, oauth_verifier } = req.query;
     const { oauth_token_secret } = req.session;
+
+    console.log('Twitter callback received:', {
+      hasOAuthToken: !!oauth_token,
+      hasVerifier: !!oauth_verifier,
+      hasSecret: !!oauth_token_secret,
+      sessionID: req.sessionID
+    });
 
     if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
       throw new Error('Missing OAuth tokens');
@@ -132,26 +127,16 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
 
 // Instagram OAuth
 router.get('/instagram', asyncHandler(async (req, res) => {
-  try {
-    console.log('Starting Instagram auth...');
-    
-    const redirectUri = process.env.IG_REDIRECT_URI;
-    console.log('Instagram redirect URI:', redirectUri);
-    
-    const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
-      process.env.IG_CLIENT_ID
-    }&redirect_uri=${
-      encodeURIComponent(redirectUri)
-    }&scope=user_profile,user_media&response_type=code`;
-    
-    res.json({ url: instagramAuthUrl });
-  } catch (error) {
-    console.error('Instagram auth error:', error);
-    res.status(500).json({ 
-      message: error.message,
-      details: process.env.NODE_ENV === 'development' ? error : undefined
-    });
-  }
+  const redirectUri = process.env.IG_REDIRECT_URI;
+  console.log('Instagram redirect URI:', redirectUri);
+  
+  const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
+    process.env.IG_CLIENT_ID
+  }&redirect_uri=${
+    encodeURIComponent(redirectUri)
+  }&scope=user_profile,user_media&response_type=code`;
+  
+  res.json({ url: instagramAuthUrl });
 }));
 
 // Instagram OAuth callback
@@ -302,91 +287,86 @@ router.post('/instagram/data-deletion', asyncHandler(async (req, res) => {
 
 // Get connected accounts
 router.get('/accounts', asyncHandler(async (req, res) => {
-  try {
-    const userId = req.session.userId;
-    console.log('Getting accounts for user:', userId);
-    
-    if (!userId) {
-      return res.json({
-        twitter: { connected: false },
-        instagram: { connected: false },
-        facebook: { connected: false }
-      });
-    }
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.json({
-        twitter: { connected: false },
-        instagram: { connected: false },
-        facebook: { connected: false }
-      });
-    }
-
-    // Verify Twitter credentials
-    let twitterConnected = false;
-    let twitterUsername = null;
-
-    if (user.socialAccounts?.twitter?.accessToken) {
-      try {
-        const client = new TwitterApi({
-          appKey: process.env.TWITTER_API_KEY,
-          appSecret: process.env.TWITTER_API_SECRET,
-          accessToken: user.socialAccounts.twitter.accessToken,
-          accessSecret: user.socialAccounts.twitter.accessSecret
-        });
-
-        const { data } = await client.v2.me();
-        twitterConnected = true;
-        twitterUsername = data.username;
-      } catch (error) {
-        console.error('Twitter verification failed:', error);
-        user.socialAccounts.twitter = null;
-        await user.save();
-      }
-    }
-
-    // Verify Instagram credentials
-    let instagramConnected = false;
-    let instagramUsername = null;
-
-    if (user.socialAccounts?.instagram?.accessToken) {
-      try {
-        const response = await axios.get(
-          `https://graph.instagram.com/me`,
-          {
-            params: {
-              fields: 'username',
-              access_token: user.socialAccounts.instagram.accessToken
-            }
-          }
-        );
-        instagramConnected = true;
-        instagramUsername = response.data.username;
-      } catch (error) {
-        console.error('Instagram verification failed:', error);
-        user.socialAccounts.instagram = null;
-        await user.save();
-      }
-    }
-
-    res.json({
-      twitter: {
-        connected: twitterConnected,
-        username: twitterUsername
-      },
-      instagram: {
-        connected: instagramConnected,
-        username: instagramUsername
-      },
-      facebook: {
-        connected: false
-      }
+  const userId = req.session.userId;
+  console.log('Getting accounts for user:', userId);
+  
+  if (!userId) {
+    return res.json({
+      twitter: { connected: false },
+      instagram: { connected: false },
+      facebook: { connected: false }
     });
-  } catch (error) {
-    console.error('Get accounts error:', error);
-    res.status(500).json({ message: error.message });
   }
+
+  const user = await User.findById(userId);
+  if (!user) {
+    return res.json({
+      twitter: { connected: false },
+      instagram: { connected: false },
+      facebook: { connected: false }
+    });
+  }
+
+  // Verify Twitter credentials
+  let twitterConnected = false;
+  let twitterUsername = null;
+
+  if (user.socialAccounts?.twitter?.accessToken) {
+    try {
+      const client = new TwitterApi({
+        appKey: process.env.TWITTER_API_KEY,
+        appSecret: process.env.TWITTER_API_SECRET,
+        accessToken: user.socialAccounts.twitter.accessToken,
+        accessSecret: user.socialAccounts.twitter.accessSecret
+      });
+
+      const { data } = await client.v2.me();
+      twitterConnected = true;
+      twitterUsername = data.username;
+    } catch (error) {
+      console.error('Twitter verification failed:', error);
+      user.socialAccounts.twitter = null;
+      await user.save();
+    }
+  }
+
+  // Verify Instagram credentials
+  let instagramConnected = false;
+  let instagramUsername = null;
+
+  if (user.socialAccounts?.instagram?.accessToken) {
+    try {
+      const response = await axios.get(
+        `https://graph.instagram.com/me`,
+        {
+          params: {
+            fields: 'username',
+            access_token: user.socialAccounts.instagram.accessToken
+          }
+        }
+      );
+      instagramConnected = true;
+      instagramUsername = response.data.username;
+    } catch (error) {
+      console.error('Instagram verification failed:', error);
+      user.socialAccounts.instagram = null;
+      await user.save();
+    }
+  }
+
+  res.json({
+    twitter: {
+      connected: twitterConnected,
+      username: twitterUsername
+    },
+    instagram: {
+      connected: instagramConnected,
+      username: instagramUsername
+    },
+    facebook: {
+      connected: false
+    }
+  });
 }));
 
 // Check auth status
