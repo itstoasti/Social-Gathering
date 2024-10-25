@@ -84,15 +84,24 @@ router.get('/twitter/callback', async (req, res) => {
       user = new User({
         email: twitterEmail,
         socialAccounts: {
-          twitter: { accessToken, accessSecret, username: screenName }
+          twitter: {
+            accessToken,
+            accessSecret,
+            username: screenName
+          }
         }
       });
     } else {
       // Update existing user's Twitter credentials
-      user.socialAccounts = {
+      const updatedSocialAccounts = {
         ...user.socialAccounts,
-        twitter: { accessToken, accessSecret, username: screenName }
+        twitter: {
+          accessToken,
+          accessSecret,
+          username: screenName
+        }
       };
+      user.socialAccounts = updatedSocialAccounts;
     }
 
     await user.save();
@@ -171,7 +180,7 @@ router.get('/accounts', async (req, res) => {
         twitterUsername = data.username;
       } catch (error) {
         console.error('Twitter verification failed:', error);
-        user.socialAccounts.twitter = undefined;
+        user.socialAccounts.twitter = null;
         await user.save();
       }
     }
