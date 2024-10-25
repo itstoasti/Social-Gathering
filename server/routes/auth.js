@@ -1,5 +1,6 @@
 import express from 'express';
 import { TwitterApi } from 'twitter-api-v2';
+import axios from 'axios';
 import User from '../models/User.js';
 
 const router = express.Router();
@@ -19,7 +20,7 @@ router.get('/twitter', async (req, res) => {
     req.session.oauth_token = oauth_token;
     req.session.oauth_token_secret = oauth_token_secret;
 
-    // Force session save and wait for completion
+    // Force session save before redirect
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -29,13 +30,6 @@ router.get('/twitter', async (req, res) => {
           resolve();
         }
       });
-    });
-
-    // Set cookie headers explicitly
-    res.set({
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
     });
 
     res.json({ url });
@@ -51,14 +45,12 @@ router.get('/twitter/callback', async (req, res) => {
     const { oauth_token, oauth_verifier } = req.query;
     const { oauth_token_secret } = req.session;
 
-    if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
-      console.error('Missing OAuth parameters:', {
-        hasToken: !!oauth_token,
-        hasVerifier: !!oauth_verifier,
-        hasSecret: !!oauth_token_secret,
-        session: req.session
-      });
-      throw new Error('Invalid OAuth session state');
+    if (!oauth_token || !oauth_verifier) {
+      throw new Error('Missing OAuth tokens');
+    }
+
+    if (!oauth_token_secret) {
+      throw new Error('Missing OAuth token secret in session');
     }
 
     const client = new TwitterApi({
@@ -69,39 +61,29 @@ router.get('/twitter/callback', async (req, res) => {
     });
 
     const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
-    const twitterEmail = `${screenName}@twitter.com`;
 
-    // First try to find user by session ID
-    let user = req.session.userId ? await User.findById(req.session.userId) : null;
-
-    // If no user found by session ID, try to find by email
-    if (!user) {
-      user = await User.findOne({ email: twitterEmail });
-    }
-
-    // If still no user, create new one
+    // Create or update user
+    let user = await User.findById(req.session.userId);
     if (!user) {
       user = new User({
-        email: twitterEmail,
+        email: `${screenName}@twitter.com`,
         socialAccounts: {
-          twitter: {
-            accessToken,
-            accessSecret,
-            username: screenName
+          twitter: { 
+            accessToken, 
+            accessSecret, 
+            username: screenName 
           }
         }
       });
     } else {
-      // Update existing user's Twitter credentials
-      const updatedSocialAccounts = {
+      user.socialAccounts = {
         ...user.socialAccounts,
-        twitter: {
-          accessToken,
-          accessSecret,
-          username: screenName
+        twitter: { 
+          accessToken, 
+          accessSecret, 
+          username: screenName 
         }
       };
-      user.socialAccounts = updatedSocialAccounts;
     }
 
     await user.save();
@@ -111,7 +93,7 @@ router.get('/twitter/callback', async (req, res) => {
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
-    // Force session save and wait for completion
+    // Force session save before redirect
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -123,19 +105,123 @@ router.get('/twitter/callback', async (req, res) => {
       });
     });
 
-    // Set cookie headers explicitly
-    res.set({
-      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0',
-      'Set-Cookie': [
-        `connect.sid=${req.sessionID}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
-      ]
+    res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
+  } catch (error) {
+    console.error('Twitter callback error:', error);
+    res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
+  }
+});
+
+// Instagram OAuth
+router.get('/instagram', async (req, res) => {
+  try {
+    const redirectUri = `${process.env.BASE_URL}/api/auth/instagram/callback`;
+    const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
+      process.env.IG_CLIENT_ID
+    }&redirect_uri=${
+      encodeURIComponent(redirectUri)
+    }&scope=user_profile,user_media&response_type=code`;
+    
+    res.json({ url: instagramAuthUrl });
+  } catch (error) {
+    console.error('Instagram auth error:', error);
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Instagram OAuth callback
+router.get('/instagram/callback', async (req, res) => {
+  try {
+    const { code } = req.query;
+    const redirectUri = `${process.env.BASE_URL}/api/auth/instagram/callback`;
+
+    if (!code) {
+      throw new Error('No authorization code received');
+    }
+
+    // Exchange code for access token
+    const tokenResponse = await axios.post('https://api.instagram.com/oauth/access_token', 
+      new URLSearchParams({
+        client_id: process.env.IG_CLIENT_ID,
+        client_secret: process.env.IG_CLIENT_SECRET,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code: code.toString()
+      }).toString(),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+      }
+    );
+
+    const { access_token, user_id } = tokenResponse.data;
+
+    // Get long-lived access token
+    const longLivedTokenResponse = await axios.get(
+      'https://graph.instagram.com/access_token',
+      {
+        params: {
+          grant_type: 'ig_exchange_token',
+          client_secret: process.env.IG_CLIENT_SECRET,
+          access_token
+        }
+      }
+    );
+
+    const longLivedToken = longLivedTokenResponse.data.access_token;
+
+    // Get user info
+    const userResponse = await axios.get(
+      `https://graph.instagram.com/me`,
+      {
+        params: {
+          fields: 'id,username',
+          access_token: longLivedToken
+        }
+      }
+    );
+
+    const { username } = userResponse.data;
+
+    // Create or update user
+    let user = await User.findById(req.session.userId);
+    if (!user) {
+      user = new User({
+        email: `${username}@instagram.com`,
+        socialAccounts: {
+          instagram: { 
+            accessToken: longLivedToken, 
+            username 
+          }
+        }
+      });
+    } else {
+      user.socialAccounts = {
+        ...user.socialAccounts,
+        instagram: { 
+          accessToken: longLivedToken, 
+          username 
+        }
+      };
+    }
+
+    await user.save();
+    req.session.userId = user._id;
+
+    // Force session save before redirect
+    await new Promise((resolve, reject) => {
+      req.session.save((err) => {
+        if (err) {
+          console.error('Session save error:', err);
+          reject(err);
+        } else {
+          resolve();
+        }
+      });
     });
 
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
-    console.error('Twitter callback error:', error);
+    console.error('Instagram callback error:', error);
     res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
   }
 });
@@ -185,13 +271,38 @@ router.get('/accounts', async (req, res) => {
       }
     }
 
+    // Verify Instagram credentials
+    let instagramConnected = false;
+    let instagramUsername = null;
+
+    if (user.socialAccounts?.instagram?.accessToken) {
+      try {
+        const response = await axios.get(
+          `https://graph.instagram.com/me`,
+          {
+            params: {
+              fields: 'username',
+              access_token: user.socialAccounts.instagram.accessToken
+            }
+          }
+        );
+        instagramConnected = true;
+        instagramUsername = response.data.username;
+      } catch (error) {
+        console.error('Instagram verification failed:', error);
+        user.socialAccounts.instagram = null;
+        await user.save();
+      }
+    }
+
     res.json({
       twitter: {
         connected: twitterConnected,
         username: twitterUsername
       },
       instagram: {
-        connected: false
+        connected: instagramConnected,
+        username: instagramUsername
       },
       facebook: {
         connected: false
