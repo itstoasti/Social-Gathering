@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { Menu } from 'lucide-react';
+import { Menu, Send, Clock } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import PostEditor from './components/PostEditor';
 import PostScheduler from './components/PostScheduler';
@@ -151,11 +151,16 @@ function MainContent() {
           </div>
         )}
 
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center gap-4">
           <button
             onClick={() => setIsScheduling(!isScheduling)}
-            className="flex items-center gap-2 text-gray-600 hover:text-gray-800"
+            className={`flex items-center gap-2 px-6 py-2 rounded-full transition-colors ${
+              isScheduling
+                ? 'bg-purple-500 text-white hover:bg-purple-600'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            }`}
           >
+            <Clock size={20} />
             Schedule
           </button>
           <button
@@ -170,6 +175,7 @@ function MainContent() {
               </span>
             ) : (
               <>
+                <Send size={20} />
                 {isScheduling ? 'Schedule Post' : 'Post Now'}
               </>
             )}
