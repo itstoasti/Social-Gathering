@@ -1,6 +1,8 @@
 import axios, { AxiosError } from 'axios';
 
-const baseURL = 'https://social-gathering.onrender.com/api';
+const baseURL = process.env.NODE_ENV === 'production' 
+  ? 'https://social-gathering.onrender.com/api'
+  : 'https://localhost:5000/api';
 
 export class ApiError extends Error {
   status?: number;
@@ -22,6 +24,43 @@ const api = axios.create({
     'Content-Type': 'application/json'
   }
 });
+
+// Add request interceptor for debugging
+api.interceptors.request.use(
+  (config) => {
+    if (process.env.NODE_ENV === 'development') {
+      console.log('API Request:', {
+        method: config.method,
+        url: config.url,
+        headers: config.headers,
+        withCredentials: config.withCredentials
+      });
+    }
+    return config;
+  },
+  (error) => {
+    console.error('API Request Error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor for error handling
+api.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    console.error('API Response Error:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      headers: error.response?.headers
+    });
+
+    if (error.response?.status === 403) {
+      console.error('CORS Error - Check allowed origins');
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 export interface ConnectedAccount {
   username?: string;
