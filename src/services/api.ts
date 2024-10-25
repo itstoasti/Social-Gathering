@@ -21,12 +21,18 @@ const api = axios.create({
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
-  }
+  },
+  // Ensure cookies are sent
+  xsrfCookieName: 'XSRF-TOKEN',
+  xsrfHeaderName: 'X-XSRF-TOKEN'
 });
 
 // Add request interceptor
 api.interceptors.request.use(
   (config) => {
+    // Ensure withCredentials is always true
+    config.withCredentials = true;
+    
     console.log('API Request:', {
       method: config.method,
       url: config.url,
@@ -44,12 +50,20 @@ api.interceptors.request.use(
 
 // Add response interceptor
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log('API Response:', {
+      status: response.status,
+      headers: response.headers,
+      data: response.data
+    });
+    return response;
+  },
   (error: AxiosError) => {
     console.error('Response Error:', {
       status: error.response?.status,
       data: error.response?.data,
-      message: error.message
+      message: error.message,
+      headers: error.response?.headers
     });
     return Promise.reject(new ApiError(
       error.response?.data?.message || error.message,
