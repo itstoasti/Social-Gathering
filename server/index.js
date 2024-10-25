@@ -3,11 +3,20 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
+import https from 'https';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import authRoutes from './routes/auth.js';
 import postRoutes from './routes/posts.js';
 import { connectDB } from './config/db.js';
 
-dotenv.config();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Load environment variables based on NODE_ENV
+dotenv.config({
+  path: path.resolve(process.cwd(), `.env.${process.env.NODE_ENV || 'development'}`)
+});
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -15,7 +24,13 @@ const PORT = process.env.PORT || 5000;
 // Initialize server
 const startServer = async () => {
   try {
-    await connectDB();
+    console.log('Starting server initialization...');
+    console.log('Environment:', process.env.NODE_ENV);
+    console.log('MongoDB URI:', process.env.MONGODB_URI?.replace(/\/\/[^:]+:[^@]+@/, '//<credentials>@'));
+
+    // Connect to MongoDB
+    const dbConnection = await connectDB();
+    console.log('MongoDB connection established');
 
     // Basic middleware
     app.use(express.json({ limit: '50mb' }));
@@ -38,6 +53,8 @@ const startServer = async () => {
       }
     });
 
+    console.log('Session store created');
+
     // Enhanced session configuration
     app.use(session({
       name: 'social.sid',
@@ -48,13 +65,15 @@ const startServer = async () => {
       proxy: true,
       rolling: true,
       cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: true, // Always use secure cookies
         httpOnly: true,
         sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
         path: '/'
       }
     }));
+
+    console.log('Session middleware configured');
 
     // CORS configuration with credentials
     app.use(cors({
@@ -65,19 +84,6 @@ const startServer = async () => {
       exposedHeaders: ['Set-Cookie']
     }));
 
-    // Session debug middleware
-    app.use((req, res, next) => {
-      console.log('Session Debug:', {
-        id: req.sessionID,
-        cookie: req.session?.cookie,
-        oauth: {
-          token: !!req.session?.oauth_token,
-          secret: !!req.session?.oauth_token_secret
-        }
-      });
-      next();
-    });
-
     // Routes
     app.use('/api/auth', authRoutes);
     app.use('/api/posts', postRoutes);
@@ -87,6 +93,10 @@ const startServer = async () => {
       res.status(200).json({ 
         status: 'ok',
         env: process.env.NODE_ENV,
+        mongodb: {
+          connected: dbConnection.readyState === 1,
+          database: dbConnection.name
+        },
         session: {
           id: req.sessionID,
           active: !!req.session
@@ -103,9 +113,43 @@ const startServer = async () => {
       });
     });
 
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
-    });
+    // Set up HTTPS server for development
+    if (process.env.NODE_ENV === 'development') {
+      const certDir = path.join(__dirname, '..', 'certs');
+      
+      // Create certs directory if it doesn't exist
+      if (!fs.existsSync(certDir)) {
+        fs.mkdirSync(certDir);
+      }
+
+      // Generate self-signed certificate if it doesn't exist
+      const keyPath = path.join(certDir, 'key.pem');
+      const certPath = path.join(certDir, 'cert.pem');
+
+      if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+        console.log('Generating self-signed certificate...');
+        const { execSync } = await import('child_process');
+        execSync(`openssl req -x509 -newkey rsa:2048 -keyout ${keyPath} -out ${certPath} -days 365 -nodes -subj "/CN=localhost"`);
+      }
+
+      const httpsOptions = {
+        key: fs.readFileSync(keyPath),
+        cert: fs.readFileSync(certPath)
+      };
+
+      https.createServer(httpsOptions, app).listen(PORT, () => {
+        console.log(`HTTPS Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+        console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
+        console.log(`API URL: ${process.env.BASE_URL}`);
+      });
+    } else {
+      // In production, we assume HTTPS is handled by the hosting platform
+      app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+        console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
+        console.log(`API URL: ${process.env.BASE_URL}`);
+      });
+    }
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
