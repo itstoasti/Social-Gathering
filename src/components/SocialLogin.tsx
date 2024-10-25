@@ -67,9 +67,7 @@ function SocialLogin() {
     try {
       setLoading(prev => ({ ...prev, twitter: true }));
       setError(null);
-      
-      const { url } = await auth.getTwitterAuthUrl();
-      if (url) window.location.href = url;
+      await auth.getTwitterAuthUrl();
     } catch (err) {
       handleError(err, 'Failed to connect to Twitter');
     } finally {
@@ -81,9 +79,7 @@ function SocialLogin() {
     try {
       setLoading(prev => ({ ...prev, instagram: true }));
       setError(null);
-      
-      const { url } = await auth.getInstagramAuthUrl();
-      if (url) window.location.href = url;
+      await auth.getInstagramAuthUrl();
     } catch (err) {
       handleError(err, 'Failed to connect to Instagram');
     } finally {
@@ -123,17 +119,17 @@ function SocialLogin() {
             <span>X.com</span>
           </div>
           <span className={`flex items-center gap-2 ${
-            accounts.twitter.connected ? 'text-green-500' : 'text-red-500'
+            accounts.twitter.connected ? 'text-green-500' : 'text-blue-500'
           }`}>
             {loading.twitter ? (
               <>
-                <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent" />
+                <span className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" />
                 Connecting...
               </>
             ) : accounts.twitter.connected ? (
               `@${accounts.twitter.username}`
             ) : (
-              'Not Connected'
+              'Connect'
             )}
           </span>
         </button>
@@ -148,11 +144,11 @@ function SocialLogin() {
             <span>Instagram</span>
           </div>
           <span className={`flex items-center gap-2 ${
-            accounts.instagram.connected ? 'text-green-500' : 'text-red-500'
+            accounts.instagram.connected ? 'text-green-500' : 'text-blue-500'
           }`}>
             {loading.instagram ? (
               <>
-                <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent" />
+                <span className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" />
                 Connecting...
               </>
             ) : accounts.instagram.connected ? (
