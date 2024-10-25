@@ -19,21 +19,23 @@ router.get('/twitter', async (req, res) => {
     req.session.oauth_token = oauth_token;
     req.session.oauth_token_secret = oauth_token_secret;
 
-    // Force session save before redirect
+    // Force session save and wait for completion
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully:', {
-            sessionId: req.sessionID,
-            hasToken: !!req.session.oauth_token,
-            hasSecret: !!req.session.oauth_token_secret
-          });
           resolve();
         }
       });
+    });
+
+    // Set cookie headers explicitly
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     });
 
     res.json({ url });
@@ -49,20 +51,14 @@ router.get('/twitter/callback', async (req, res) => {
     const { oauth_token, oauth_verifier } = req.query;
     const { oauth_token_secret } = req.session;
 
-    console.log('Callback received:', {
-      sessionId: req.sessionID,
-      hasQueryToken: !!oauth_token,
-      hasQueryVerifier: !!oauth_verifier,
-      hasSessionSecret: !!oauth_token_secret,
-      session: req.session
-    });
-
-    if (!oauth_token || !oauth_verifier) {
-      throw new Error('Missing OAuth tokens');
-    }
-
-    if (!oauth_token_secret) {
-      throw new Error('Missing OAuth token secret in session');
+    if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
+      console.error('Missing OAuth parameters:', {
+        hasToken: !!oauth_token,
+        hasVerifier: !!oauth_verifier,
+        hasSecret: !!oauth_token_secret,
+        session: req.session
+      });
+      throw new Error('Invalid OAuth session state');
     }
 
     const client = new TwitterApi({
@@ -92,35 +88,32 @@ router.get('/twitter/callback', async (req, res) => {
     }
 
     await user.save();
-
-    // Update session with user ID
     req.session.userId = user._id;
 
     // Clear OAuth tokens
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
-    // Force session save before redirect
+    // Force session save and wait for completion
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully:', {
-            sessionId: req.sessionID,
-            userId: req.session.userId
-          });
           resolve();
         }
       });
     });
 
-    // Set additional headers for session persistence
+    // Set cookie headers explicitly
     res.set({
       'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
       'Pragma': 'no-cache',
-      'Expires': '0'
+      'Expires': '0',
+      'Set-Cookie': [
+        `connect.sid=${req.sessionID}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+      ]
     });
 
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
