@@ -1,8 +1,22 @@
 import axios, { AxiosError } from 'axios';
 
-const baseURL = process.env.NODE_ENV === 'production' 
-  ? 'https://social-gathering.onrender.com/api'
-  : 'https://localhost:5000/api';
+// Determine API base URL based on current hostname
+const getBaseUrl = () => {
+  const hostname = window.location.hostname;
+  
+  if (hostname.includes('localhost')) {
+    return 'https://localhost:5000/api';
+  } else if (hostname.includes('stackblitz.io')) {
+    return 'https://social-gathering.onrender.com/api';
+  } else if (hostname.includes('onrender.com')) {
+    return 'https://social-gathering.onrender.com/api';
+  }
+  
+  // Default to production
+  return 'https://social-gathering.onrender.com/api';
+};
+
+const baseURL = getBaseUrl();
 
 export class ApiError extends Error {
   status?: number;
@@ -28,14 +42,13 @@ const api = axios.create({
 // Add request interceptor for debugging
 api.interceptors.request.use(
   (config) => {
-    if (process.env.NODE_ENV === 'development') {
-      console.log('API Request:', {
-        method: config.method,
-        url: config.url,
-        headers: config.headers,
-        withCredentials: config.withCredentials
-      });
-    }
+    console.log('API Request:', {
+      method: config.method,
+      url: config.url,
+      baseURL: config.baseURL,
+      headers: config.headers,
+      withCredentials: config.withCredentials
+    });
     return config;
   },
   (error) => {
@@ -51,14 +64,19 @@ api.interceptors.response.use(
     console.error('API Response Error:', {
       status: error.response?.status,
       data: error.response?.data,
-      headers: error.response?.headers
+      headers: error.response?.headers,
+      message: error.message
     });
 
     if (error.response?.status === 403) {
       console.error('CORS Error - Check allowed origins');
     }
 
-    return Promise.reject(error);
+    return Promise.reject(new ApiError(
+      error.response?.data?.message || error.message,
+      error.response?.status,
+      error.response?.data
+    ));
   }
 );
 
