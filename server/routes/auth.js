@@ -5,8 +5,13 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
+// Error wrapper
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
 // Twitter OAuth
-router.get('/twitter', async (req, res) => {
+router.get('/twitter', asyncHandler(async (req, res) => {
   try {
     console.log('Starting Twitter auth...');
     
@@ -40,12 +45,15 @@ router.get('/twitter', async (req, res) => {
     res.json({ url });
   } catch (error) {
     console.error('Twitter auth error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ 
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error : undefined
+    });
   }
-});
+}));
 
 // Twitter OAuth callback
-router.get('/twitter/callback', async (req, res) => {
+router.get('/twitter/callback', asyncHandler(async (req, res) => {
   try {
     console.log('Twitter callback received:', {
       query: req.query,
@@ -120,10 +128,10 @@ router.get('/twitter/callback', async (req, res) => {
     console.error('Twitter callback error:', error);
     res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
   }
-});
+}));
 
 // Instagram OAuth
-router.get('/instagram', async (req, res) => {
+router.get('/instagram', asyncHandler(async (req, res) => {
   try {
     console.log('Starting Instagram auth...');
     
@@ -139,12 +147,15 @@ router.get('/instagram', async (req, res) => {
     res.json({ url: instagramAuthUrl });
   } catch (error) {
     console.error('Instagram auth error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ 
+      message: error.message,
+      details: process.env.NODE_ENV === 'development' ? error : undefined
+    });
   }
-});
+}));
 
 // Instagram OAuth callback
-router.get('/instagram/callback', async (req, res) => {
+router.get('/instagram/callback', asyncHandler(async (req, res) => {
   try {
     console.log('Instagram callback received:', {
       code: req.query.code ? 'present' : 'missing',
@@ -246,10 +257,10 @@ router.get('/instagram/callback', async (req, res) => {
     console.error('Instagram callback error:', error);
     res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
   }
-});
+}));
 
 // Instagram deauthorization callback
-router.post('/instagram/deauthorize', async (req, res) => {
+router.post('/instagram/deauthorize', asyncHandler(async (req, res) => {
   try {
     const { signed_request } = req.body;
     
@@ -265,10 +276,10 @@ router.post('/instagram/deauthorize', async (req, res) => {
     console.error('Instagram deauthorize error:', error);
     res.status(500).json({ message: error.message });
   }
-});
+}));
 
 // Instagram data deletion
-router.post('/instagram/data-deletion', async (req, res) => {
+router.post('/instagram/data-deletion', asyncHandler(async (req, res) => {
   try {
     const { signed_request } = req.body;
     
@@ -287,10 +298,10 @@ router.post('/instagram/data-deletion', async (req, res) => {
     console.error('Instagram data deletion error:', error);
     res.status(500).json({ message: error.message });
   }
-});
+}));
 
 // Get connected accounts
-router.get('/accounts', async (req, res) => {
+router.get('/accounts', asyncHandler(async (req, res) => {
   try {
     const userId = req.session.userId;
     console.log('Getting accounts for user:', userId);
@@ -376,7 +387,7 @@ router.get('/accounts', async (req, res) => {
     console.error('Get accounts error:', error);
     res.status(500).json({ message: error.message });
   }
-});
+}));
 
 // Check auth status
 router.get('/status', (req, res) => {
