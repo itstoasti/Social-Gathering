@@ -115,12 +115,10 @@ router.get('/twitter/callback', async (req, res) => {
 // Instagram OAuth
 router.get('/instagram', async (req, res) => {
   try {
-    const redirectUri = `${process.env.BASE_URL}/api/auth/instagram/callback`;
+    const redirectUri = encodeURIComponent(process.env.IG_REDIRECT_URI);
     const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
       process.env.IG_CLIENT_ID
-    }&redirect_uri=${
-      encodeURIComponent(redirectUri)
-    }&scope=user_profile,user_media&response_type=code`;
+    }&redirect_uri=${redirectUri}&scope=user_profile,user_media&response_type=code`;
     
     res.json({ url: instagramAuthUrl });
   } catch (error) {
@@ -133,7 +131,6 @@ router.get('/instagram', async (req, res) => {
 router.get('/instagram/callback', async (req, res) => {
   try {
     const { code } = req.query;
-    const redirectUri = `${process.env.BASE_URL}/api/auth/instagram/callback`;
 
     if (!code) {
       throw new Error('No authorization code received');
@@ -145,7 +142,7 @@ router.get('/instagram/callback', async (req, res) => {
         client_id: process.env.IG_CLIENT_ID,
         client_secret: process.env.IG_CLIENT_SECRET,
         grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
+        redirect_uri: process.env.IG_REDIRECT_URI,
         code: code.toString()
       }).toString(),
       {
@@ -206,18 +203,6 @@ router.get('/instagram/callback', async (req, res) => {
 
     await user.save();
     req.session.userId = user._id;
-
-    // Force session save before redirect
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          reject(err);
-        } else {
-          resolve();
-        }
-      });
-    });
 
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
   } catch (error) {
