@@ -1,6 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { Menu, Send, Clock } from 'lucide-react';
+import { Menu, Send, Clock, X, Instagram, Facebook } from 'lucide-react';
 import Sidebar from './components/Sidebar';
 import PostEditor from './components/PostEditor';
 import PostScheduler from './components/PostScheduler';
@@ -33,15 +33,19 @@ function MainContent() {
         throw new Error('No file selected');
       }
 
+      // Check file size (10MB limit)
       if (file.size > 10 * 1024 * 1024) {
         throw new Error('File size must be less than 10MB');
       }
 
+      // Determine media type
       const type = file.type.startsWith('image/') ? 'image' : 'video';
       setMediaType(type);
 
+      // Create object URL for preview
       const objectUrl = URL.createObjectURL(file);
 
+      // Handle image compression
       if (type === 'image') {
         try {
           const compressed = await compressImage(file);
@@ -63,6 +67,15 @@ function MainContent() {
       setMediaType(null);
     }
   };
+
+  const handleMediaRemove = useCallback(() => {
+    if (mediaPreview?.startsWith('blob:')) {
+      URL.revokeObjectURL(mediaPreview);
+    }
+    setMediaFile(null);
+    setMediaPreview(null);
+    setMediaType(null);
+  }, [mediaPreview]);
 
   const handlePost = async () => {
     try {
@@ -86,6 +99,7 @@ function MainContent() {
 
       await posts.create(postData);
 
+      // Reset form on success
       setCaption('');
       setMediaFile(null);
       setMediaPreview(null);
@@ -105,15 +119,6 @@ function MainContent() {
       setIsPosting(false);
     }
   };
-
-  const handleMediaRemove = useCallback(() => {
-    if (mediaPreview?.startsWith('blob:')) {
-      URL.revokeObjectURL(mediaPreview);
-    }
-    setMediaFile(null);
-    setMediaPreview(null);
-    setMediaType(null);
-  }, [mediaPreview]);
 
   return (
     <div className="max-w-4xl mx-auto p-6">
@@ -141,7 +146,24 @@ function MainContent() {
                 : 'bg-gray-100 text-gray-700'
             }`}
           >
+            <X size={18} />
             X.com
+          </button>
+          <button
+            disabled
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-gray-100 text-gray-400 cursor-not-allowed"
+            title="Coming soon"
+          >
+            <Instagram size={18} />
+            Instagram
+          </button>
+          <button
+            disabled
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-gray-100 text-gray-400 cursor-not-allowed"
+            title="Coming soon"
+          >
+            <Facebook size={18} />
+            Facebook
           </button>
         </div>
 
