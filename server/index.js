@@ -21,12 +21,10 @@ const startServer = async () => {
     app.use(express.json({ limit: '50mb' }));
     app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-    // Trust proxy for secure cookies in production
-    if (process.env.NODE_ENV === 'production') {
-      app.set('trust proxy', 1);
-    }
+    // Trust proxy for secure cookies
+    app.set('trust proxy', 1);
 
-    // Session store setup with enhanced security
+    // Session store setup
     const sessionStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
       ttl: 24 * 60 * 60,
@@ -38,7 +36,7 @@ const startServer = async () => {
       }
     });
 
-    // Enhanced session configuration
+    // Session configuration
     app.use(session({
       name: 'social.sid',
       secret: process.env.SESSION_SECRET,
@@ -57,6 +55,9 @@ const startServer = async () => {
 
     // CORS configuration
     const corsOptions = {
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
       origin: (origin, callback) => {
         const allowedOrigins = [
           process.env.FRONTEND_URL,
@@ -71,26 +72,21 @@ const startServer = async () => {
           console.warn('Blocked by CORS:', origin);
           callback(new Error('Not allowed by CORS'));
         }
-      },
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-      exposedHeaders: ['Set-Cookie']
+      }
     };
 
     app.use(cors(corsOptions));
     app.options('*', cors(corsOptions));
 
-    // Session debug middleware
+    // Debug middleware
     app.use((req, res, next) => {
-      console.log('Session Debug:', {
-        id: req.sessionID,
-        cookie: req.session?.cookie,
+      console.log('Request Debug:', {
+        path: req.path,
+        method: req.method,
+        origin: req.get('origin'),
+        sessionID: req.sessionID,
         userId: req.session?.userId,
-        oauth: {
-          token: !!req.session?.oauth_token,
-          secret: !!req.session?.oauth_token_secret
-        }
+        cookies: req.cookies
       });
       next();
     });
@@ -138,7 +134,6 @@ const startServer = async () => {
       console.log('Frontend URL:', process.env.FRONTEND_URL);
       console.log('Base URL:', process.env.BASE_URL);
     });
-
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
