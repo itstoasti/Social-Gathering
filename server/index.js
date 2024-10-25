@@ -30,63 +30,48 @@ const startServer = async () => {
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
       touchAfter: 0,
-      stringify: false,
-      crypto: {
-        secret: process.env.SESSION_SECRET
-      }
+      stringify: false
     });
 
     // Session configuration
     app.use(session({
       name: 'social.sid',
       secret: process.env.SESSION_SECRET,
-      resave: false,
-      saveUninitialized: false,
+      resave: true,
+      saveUninitialized: true,
       store: sessionStore,
       proxy: true,
       cookie: {
-        secure: true,
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        sameSite: 'none',
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
         domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
         maxAge: 24 * 60 * 60 * 1000
       }
     }));
 
     // CORS configuration
-    const corsOptions = {
+    app.use(cors({
+      origin: [
+        'https://social-crosspost-frontend.onrender.com',
+        'http://localhost:5173',
+        'https://localhost:5173'
+      ],
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      origin: (origin, callback) => {
-        const allowedOrigins = [
-          process.env.FRONTEND_URL,
-          'https://social-crosspost-frontend.onrender.com',
-          'http://localhost:5173',
-          'https://localhost:5173'
-        ];
-        
-        if (!origin || allowedOrigins.includes(origin)) {
-          callback(null, true);
-        } else {
-          console.warn('Blocked by CORS:', origin);
-          callback(new Error('Not allowed by CORS'));
-        }
-      }
-    };
-
-    app.use(cors(corsOptions));
-    app.options('*', cors(corsOptions));
+      allowedHeaders: ['Content-Type', 'Authorization']
+    }));
 
     // Debug middleware
     app.use((req, res, next) => {
-      console.log('Request Debug:', {
-        path: req.path,
+      console.log('Request:', {
         method: req.method,
-        origin: req.get('origin'),
-        sessionID: req.sessionID,
-        userId: req.session?.userId,
-        cookies: req.cookies
+        path: req.path,
+        cookies: req.cookies,
+        session: {
+          id: req.sessionID,
+          userId: req.session?.userId
+        }
       });
       next();
     });
@@ -102,54 +87,27 @@ const startServer = async () => {
         env: process.env.NODE_ENV,
         session: {
           id: req.sessionID,
-          active: !!req.session,
-          cookie: req.session?.cookie
+          active: !!req.session
         }
       });
     });
 
-    // Global error handling middleware
+    // Error handling middleware
     app.use((err, req, res, next) => {
-      console.error('Server Error:', {
-        message: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-        path: req.path,
-        method: req.method
-      });
-
+      console.error('Server Error:', err);
       res.status(err.status || 500).json({
         message: err.message || 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? {
-          stack: err.stack,
-          details: err
-        } : {
-          message: 'An unexpected error occurred'
-        }
+        error: process.env.NODE_ENV === 'development' ? err : {}
       });
     });
 
-    // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
-      console.log('Frontend URL:', process.env.FRONTEND_URL);
-      console.log('Base URL:', process.env.BASE_URL);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
     process.exit(1);
   }
 };
-
-// Handle uncaught exceptions
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-  process.exit(1);
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-  process.exit(1);
-});
 
 startServer();
