@@ -2,23 +2,8 @@ import express from 'express';
 import { TwitterApi } from 'twitter-api-v2';
 import axios from 'axios';
 import User from '../models/User.js';
-import Post from '../models/Post.js';
-import crypto from 'crypto';
 
 const router = express.Router();
-
-// Debug middleware for session
-router.use((req, res, next) => {
-  console.log('Session Debug:', {
-    id: req.sessionID,
-    userId: req.session?.userId,
-    oauth: {
-      token: !!req.session?.oauth_token,
-      secret: !!req.session?.oauth_token_secret
-    }
-  });
-  next();
-});
 
 // Twitter OAuth
 router.get('/twitter', async (req, res) => {
@@ -31,7 +16,7 @@ router.get('/twitter', async (req, res) => {
     });
 
     const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
-    console.log('Callback URL:', callbackUrl);
+    console.log('Twitter callback URL:', callbackUrl);
     
     const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
 
@@ -39,7 +24,7 @@ router.get('/twitter', async (req, res) => {
     req.session.oauth_token = oauth_token;
     req.session.oauth_token_secret = oauth_token_secret;
 
-    // Force session save before redirect
+    // Force session save
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -52,7 +37,6 @@ router.get('/twitter', async (req, res) => {
       });
     });
 
-    console.log('Redirecting to Twitter...');
     res.json({ url });
   } catch (error) {
     console.error('Twitter auth error:', error);
@@ -74,12 +58,8 @@ router.get('/twitter/callback', async (req, res) => {
     const { oauth_token, oauth_verifier } = req.query;
     const { oauth_token_secret } = req.session;
 
-    if (!oauth_token || !oauth_verifier) {
+    if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
       throw new Error('Missing OAuth tokens');
-    }
-
-    if (!oauth_token_secret) {
-      throw new Error('Missing OAuth token secret in session');
     }
 
     const client = new TwitterApi({
@@ -122,7 +102,7 @@ router.get('/twitter/callback', async (req, res) => {
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
-    // Force session save before redirect
+    // Force session save
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -148,13 +128,14 @@ router.get('/instagram', async (req, res) => {
     console.log('Starting Instagram auth...');
     
     const redirectUri = process.env.IG_REDIRECT_URI;
+    console.log('Instagram redirect URI:', redirectUri);
+    
     const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
       process.env.IG_CLIENT_ID
     }&redirect_uri=${
       encodeURIComponent(redirectUri)
     }&scope=user_profile,user_media&response_type=code`;
     
-    console.log('Instagram Auth URL:', instagramAuthUrl);
     res.json({ url: instagramAuthUrl });
   } catch (error) {
     console.error('Instagram auth error:', error);
@@ -166,10 +147,10 @@ router.get('/instagram', async (req, res) => {
 router.get('/instagram/callback', async (req, res) => {
   try {
     console.log('Instagram callback received:', {
-      query: req.query,
-      session: {
-        id: req.sessionID
-      }
+      code: req.query.code ? 'present' : 'missing',
+      error: req.query.error,
+      errorReason: req.query.error_reason,
+      errorDescription: req.query.error_description
     });
 
     const { code } = req.query;
@@ -247,7 +228,7 @@ router.get('/instagram/callback', async (req, res) => {
     await user.save();
     req.session.userId = user._id;
 
-    // Force session save before redirect
+    // Force session save
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
@@ -276,28 +257,10 @@ router.post('/instagram/deauthorize', async (req, res) => {
       throw new Error('No signed request received');
     }
 
-    // Verify signed request
-    const [encodedSig, payload] = signed_request.split('.');
-    const sig = Buffer.from(encodedSig, 'base64').toString('hex');
-    const data = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
-
-    const expectedSig = crypto
-      .createHmac('sha256', process.env.IG_CLIENT_SECRET)
-      .update(payload)
-      .digest('hex');
-
-    if (sig !== expectedSig) {
-      throw new Error('Invalid signature');
-    }
-
-    // Find and update user
-    const user = await User.findOne({ 'socialAccounts.instagram.userId': data.user_id });
-    if (user) {
-      user.socialAccounts.instagram = null;
-      await user.save();
-    }
-
-    res.status(200).json({ message: 'Successfully deauthorized' });
+    // TODO: Verify signed request
+    // Remove user's Instagram credentials
+    
+    res.status(200).send('OK');
   } catch (error) {
     console.error('Instagram deauthorize error:', error);
     res.status(500).json({ message: error.message });
@@ -313,34 +276,12 @@ router.post('/instagram/data-deletion', async (req, res) => {
       throw new Error('No signed request received');
     }
 
-    // Verify signed request
-    const [encodedSig, payload] = signed_request.split('.');
-    const sig = Buffer.from(encodedSig, 'base64').toString('hex');
-    const data = JSON.parse(Buffer.from(payload, 'base64').toString('utf-8'));
-
-    const expectedSig = crypto
-      .createHmac('sha256', process.env.IG_CLIENT_SECRET)
-      .update(payload)
-      .digest('hex');
-
-    if (sig !== expectedSig) {
-      throw new Error('Invalid signature');
-    }
-
-    // Delete user data
-    const user = await User.findOne({ 'socialAccounts.instagram.userId': data.user_id });
-    if (user) {
-      // Delete associated posts
-      await Post.deleteMany({ user: user._id });
-      // Delete user
-      await user.deleteOne();
-    }
-
-    // Respond with confirmation URL
-    const confirmationCode = crypto.randomBytes(32).toString('hex');
-    res.json({
-      url: `${process.env.BASE_URL}/api/auth/instagram/data-deletion/confirm/${confirmationCode}`,
-      confirmation_code: confirmationCode
+    // TODO: Verify signed request
+    // Delete user's Instagram data
+    
+    res.status(200).json({
+      url: `${process.env.BASE_URL}/api/instagram/data-deletion/status`,
+      confirmation_code: 'PENDING'
     });
   } catch (error) {
     console.error('Instagram data deletion error:', error);
@@ -352,6 +293,7 @@ router.post('/instagram/data-deletion', async (req, res) => {
 router.get('/accounts', async (req, res) => {
   try {
     const userId = req.session.userId;
+    console.log('Getting accounts for user:', userId);
     
     if (!userId) {
       return res.json({
@@ -438,8 +380,14 @@ router.get('/accounts', async (req, res) => {
 
 // Check auth status
 router.get('/status', (req, res) => {
+  console.log('Auth status check:', {
+    sessionId: req.sessionID,
+    userId: req.session?.userId,
+    authenticated: !!req.session?.userId
+  });
+  
   res.json({
-    authenticated: !!req.session.userId,
+    authenticated: !!req.session?.userId,
     sessionId: req.sessionID
   });
 });
