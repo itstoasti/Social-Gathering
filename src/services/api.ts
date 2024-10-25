@@ -1,22 +1,8 @@
 import axios, { AxiosError } from 'axios';
 
-// Determine API base URL based on current hostname
-const getBaseUrl = () => {
-  const hostname = window.location.hostname;
-  
-  if (hostname.includes('localhost')) {
-    return 'https://localhost:5000/api';
-  } else if (hostname.includes('stackblitz.io')) {
-    return 'https://social-gathering.onrender.com/api';
-  } else if (hostname.includes('onrender.com')) {
-    return 'https://social-gathering.onrender.com/api';
-  }
-  
-  // Default to production
-  return 'https://social-gathering.onrender.com/api';
-};
-
-const baseURL = getBaseUrl();
+const baseURL = process.env.NODE_ENV === 'production' 
+  ? 'https://social-gathering.onrender.com/api'
+  : 'http://localhost:5000/api';
 
 export class ApiError extends Error {
   status?: number;
@@ -33,13 +19,12 @@ export class ApiError extends Error {
 const api = axios.create({
   baseURL,
   withCredentials: true,
-  timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
   }
 });
 
-// Add request interceptor for debugging
+// Add request interceptor
 api.interceptors.request.use(
   (config) => {
     console.log('API Request:', {
@@ -52,26 +37,20 @@ api.interceptors.request.use(
     return config;
   },
   (error) => {
-    console.error('API Request Error:', error);
+    console.error('Request Error:', error);
     return Promise.reject(error);
   }
 );
 
-// Add response interceptor for error handling
+// Add response interceptor
 api.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    console.error('API Response Error:', {
+    console.error('Response Error:', {
       status: error.response?.status,
       data: error.response?.data,
-      headers: error.response?.headers,
       message: error.message
     });
-
-    if (error.response?.status === 403) {
-      console.error('CORS Error - Check allowed origins');
-    }
-
     return Promise.reject(new ApiError(
       error.response?.data?.message || error.message,
       error.response?.status,
