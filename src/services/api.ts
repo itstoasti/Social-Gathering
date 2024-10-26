@@ -1,7 +1,8 @@
 import axios, { AxiosError } from 'axios';
 
-// Always use the production API URL
-const baseURL = 'https://social-gathering.onrender.com/api';
+const baseURL = import.meta.env.PROD 
+  ? 'https://social-gathering.onrender.com/api'
+  : 'http://localhost:5000/api';
 
 export class ApiError extends Error {
   status?: number;
@@ -18,55 +19,62 @@ export class ApiError extends Error {
 const api = axios.create({
   baseURL,
   withCredentials: true,
-  timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
   },
-  maxContentLength: Infinity,
-  maxBodyLength: Infinity
+  maxRedirects: 5,
+  validateStatus: (status) => {
+    return status >= 200 && status < 500;
+  }
 });
 
-// Add request interceptor for debugging
+// Add request interceptor
 api.interceptors.request.use(
-  config => {
-    console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
-      headers: config.headers,
-      data: config.data
-    });
+  (config) => {
+    // Add timestamp to prevent caching
+    const timestamp = new Date().getTime();
+    const separator = config.url?.includes('?') ? '&' : '?';
+    config.url = `${config.url}${separator}_=${timestamp}`;
     return config;
   },
-  error => {
-    console.error('[API Request Error]', error);
-    return Promise.reject(error);
+  (error) => {
+    console.error('Request Error:', error);
+    return Promise.reject(new ApiError(
+      'Failed to make request',
+      error.response?.status,
+      error
+    ));
   }
 );
 
-// Add response interceptor for better error handling
+// Add response interceptor
 api.interceptors.response.use(
-  response => {
-    console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
-      status: response.status,
-      data: response.data
-    });
+  (response) => {
+    if (response.status === 401) {
+      // Handle unauthorized access
+      window.location.href = '/';
+    }
     return response;
   },
   (error: AxiosError) => {
-    const apiError = new ApiError(
-      error.response?.data?.message || error.message || 'An unexpected error occurred',
+    if (!error.response) {
+      throw new ApiError(
+        'Network Error - Please check your connection',
+        0,
+        error
+      );
+    }
+
+    if (error.response.status === 401) {
+      // Handle unauthorized access
+      window.location.href = '/';
+    }
+
+    throw new ApiError(
+      error.response?.data?.message || error.message,
       error.response?.status,
       error.response?.data
     );
-
-    if (!error.response && error.request) {
-      if (error.code === 'ECONNABORTED') {
-        apiError.message = 'Request timed out. Please try again.';
-      } else {
-        apiError.message = 'No response received from server. Please check your connection.';
-      }
-    }
-
-    console.error('API Error:', apiError);
-    return Promise.reject(apiError);
   }
 );
 
@@ -81,45 +89,6 @@ export interface ConnectedAccounts {
   instagram: ConnectedAccount;
   facebook: ConnectedAccount;
 }
-
-// Retry mechanism for failed requests
-const withRetry = async (fn: () => Promise<any>, retries = 2, delay = 1000) => {
-  try {
-    return await fn();
-  } catch (error) {
-    if (retries > 0 && error instanceof ApiError && (!error.status || error.status >= 500)) {
-      await new Promise(resolve => setTimeout(resolve, delay));
-      return withRetry(fn, retries - 1, delay * 2);
-    }
-    throw error;
-  }
-};
-
-export const auth = {
-  getTwitterAuthUrl: () => 
-    withRetry(() => api.get<{ url: string }>('/auth/twitter')
-      .then(response => response.data)),
-      
-  getInstagramAuthUrl: () => 
-    withRetry(() => api.get<{ url: string }>('/auth/instagram')
-      .then(response => response.data)),
-      
-  getFacebookAuthUrl: () => 
-    withRetry(() => api.get<{ url: string }>('/auth/facebook')
-      .then(response => response.data)),
-      
-  getConnectedAccounts: () => 
-    withRetry(() => api.get<ConnectedAccounts>('/auth/accounts')
-      .then(response => response.data)),
-      
-  checkAuthStatus: () => 
-    withRetry(() => api.get<{ authenticated: boolean }>('/auth/status')
-      .then(response => response.data)),
-      
-  debugSession: () => 
-    withRetry(() => api.get('/auth/debug-session')
-      .then(response => response.data))
-};
 
 export interface CreatePostData {
   caption: string;
@@ -140,14 +109,69 @@ export interface Post extends CreatePostData {
   updatedAt: string;
 }
 
+export const auth = {
+  getTwitterAuthUrl: async () => {
+    try {
+      const response = await api.get<{ url: string }>('/auth/twitter');
+      if (response.data?.url) {
+        window.location.href = response.data.url;
+      } else {
+        throw new Error('No authorization URL received');
+      }
+      return response.data;
+    } catch (error) {
+      console.error('Twitter auth error:', error);
+      throw error;
+    }
+  },
+      
+  getInstagramAuthUrl: async () => {
+    try {
+      const response = await api.get<{ url: string }>('/auth/instagram');
+      if (response.data?.url) {
+        window.location.href = response.data.url;
+      } else {
+        throw new Error('No authorization URL received');
+      }
+      return response.data;
+    } catch (error) {
+      console.error('Instagram auth error:', error);
+      throw error;
+    }
+  },
+      
+  getFacebookAuthUrl: () => 
+    api.get<{ url: string }>('/auth/facebook')
+      .then(response => response.data),
+      
+  getConnectedAccounts: () => 
+    api.get<ConnectedAccounts>('/auth/accounts')
+      .then(response => response.data),
+      
+  checkAuthStatus: () => 
+    api.get<{ authenticated: boolean; sessionId: string }>('/auth/status')
+      .then(response => {
+        console.log('Auth status:', response.data);
+        return response.data;
+      })
+};
+
 export const posts = {
   create: (postData: CreatePostData) => 
-    withRetry(() => api.post<Post>('/posts', postData)
-      .then(response => response.data)),
+    api.post<Post>('/posts', postData)
+      .then(response => response.data),
   
   getAll: () => 
-    withRetry(() => api.get<Post[]>('/posts')
-      .then(response => response.data))
+    api.get<Post[]>('/posts')
+      .then(response => response.data),
+
+  update: (id: string, data: Partial<CreatePostData>) =>
+    api.put<Post>(`/posts/${id}`, data)
+      .then(response => response.data),
+
+  delete: (id: string) =>
+    api.delete<{ message: string }>(`/posts/${id}`)
+      .then(response => response.data)
 };
 
 export default api;
