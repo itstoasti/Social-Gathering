@@ -1,6 +1,5 @@
 import express from 'express';
 import { TwitterApi } from 'twitter-api-v2';
-import axios from 'axios';
 import User from '../models/User.js';
 
 const router = express.Router();
@@ -14,18 +13,11 @@ router.get('/twitter', async (req, res) => {
     });
 
     const callbackUrl = `${process.env.BASE_URL}/api/auth/twitter/callback`;
-    console.log('Twitter callback URL:', callbackUrl);
-    
-    const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl, {
-      linkMode: 'authorize'
-    });
+    const { url, oauth_token, oauth_token_secret } = await client.generateAuthLink(callbackUrl);
 
     // Store tokens in session
-    req.session = {
-      ...req.session,
-      oauth_token,
-      oauth_token_secret
-    };
+    req.session.oauth_token = oauth_token;
+    req.session.oauth_token_secret = oauth_token_secret;
 
     // Force session save and wait for completion
     await new Promise((resolve, reject) => {
@@ -34,14 +26,16 @@ router.get('/twitter', async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully:', {
-            sessionID: req.sessionID,
-            hasOAuthToken: !!oauth_token,
-            hasOAuthSecret: !!oauth_token_secret
-          });
           resolve();
         }
       });
+    });
+
+    // Set cookie headers explicitly
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     });
 
     res.json({ url });
@@ -55,17 +49,16 @@ router.get('/twitter', async (req, res) => {
 router.get('/twitter/callback', async (req, res) => {
   try {
     const { oauth_token, oauth_verifier } = req.query;
-    const { oauth_token_secret } = req.session || {};
-
-    console.log('Twitter callback received:', {
-      hasOAuthToken: !!oauth_token,
-      hasVerifier: !!oauth_verifier,
-      hasSecret: !!oauth_token_secret,
-      sessionID: req.sessionID
-    });
+    const { oauth_token_secret } = req.session;
 
     if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
-      throw new Error('Missing OAuth tokens');
+      console.error('Missing OAuth parameters:', {
+        hasToken: !!oauth_token,
+        hasVerifier: !!oauth_verifier,
+        hasSecret: !!oauth_token_secret,
+        session: req.session
+      });
+      throw new Error('Invalid OAuth session state');
     }
 
     const client = new TwitterApi({
@@ -76,33 +69,45 @@ router.get('/twitter/callback', async (req, res) => {
     });
 
     const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
+    const twitterEmail = `${screenName}@twitter.com`;
 
-    // Create or update user
-    let user = await User.findOne({ 'socialAccounts.twitter.username': screenName });
-    
+    // First try to find user by session ID
+    let user = req.session.userId ? await User.findById(req.session.userId) : null;
+
+    // If no user found by session ID, try to find by email
+    if (!user) {
+      user = await User.findOne({ email: twitterEmail });
+    }
+
+    // If still no user, create new one
     if (!user) {
       user = new User({
-        email: `${screenName}@twitter.com`,
+        email: twitterEmail,
         socialAccounts: {
-          twitter: { 
-            accessToken, 
-            accessSecret, 
-            username: screenName 
+          twitter: {
+            accessToken,
+            accessSecret,
+            username: screenName
           }
         }
       });
     } else {
-      user.socialAccounts.twitter = {
-        accessToken,
-        accessSecret,
-        username: screenName
+      // Update existing user's Twitter credentials
+      const updatedSocialAccounts = {
+        ...user.socialAccounts,
+        twitter: {
+          accessToken,
+          accessSecret,
+          username: screenName
+        }
       };
+      user.socialAccounts = updatedSocialAccounts;
     }
 
     await user.save();
-
-    // Update session
     req.session.userId = user._id;
+
+    // Clear OAuth tokens
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
@@ -113,13 +118,19 @@ router.get('/twitter/callback', async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully:', {
-            sessionID: req.sessionID,
-            userId: user._id
-          });
           resolve();
         }
       });
+    });
+
+    // Set cookie headers explicitly
+    res.set({
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'Set-Cookie': [
+        `connect.sid=${req.sessionID}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`
+      ]
     });
 
     res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
@@ -129,122 +140,10 @@ router.get('/twitter/callback', async (req, res) => {
   }
 });
 
-// Instagram OAuth
-router.get('/instagram', async (req, res) => {
-  try {
-    const redirectUri = process.env.IG_REDIRECT_URI;
-    console.log('Instagram redirect URI:', redirectUri);
-    
-    const instagramAuthUrl = `https://api.instagram.com/oauth/authorize?client_id=${
-      process.env.IG_CLIENT_ID
-    }&redirect_uri=${
-      encodeURIComponent(redirectUri)
-    }&scope=user_profile,user_media&response_type=code`;
-    
-    res.json({ url: instagramAuthUrl });
-  } catch (error) {
-    console.error('Instagram auth error:', error);
-    res.status(500).json({ message: error.message });
-  }
-});
-
-// Instagram OAuth callback
-router.get('/instagram/callback', async (req, res) => {
-  try {
-    const { code } = req.query;
-    console.log('Instagram callback received:', {
-      hasCode: !!code,
-      sessionID: req.sessionID
-    });
-
-    if (!code) {
-      throw new Error('No authorization code received');
-    }
-
-    const redirectUri = process.env.IG_REDIRECT_URI;
-
-    // Exchange code for access token
-    const tokenResponse = await axios.post('https://api.instagram.com/oauth/access_token', 
-      new URLSearchParams({
-        client_id: process.env.IG_CLIENT_ID,
-        client_secret: process.env.IG_CLIENT_SECRET,
-        grant_type: 'authorization_code',
-        redirect_uri: redirectUri,
-        code: code.toString()
-      }).toString(),
-      {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-      }
-    );
-
-    const { access_token, user_id } = tokenResponse.data;
-
-    // Get user info
-    const userResponse = await axios.get(
-      `https://graph.instagram.com/me`,
-      {
-        params: {
-          fields: 'id,username',
-          access_token: access_token
-        }
-      }
-    );
-
-    const { username } = userResponse.data;
-
-    // Create or update user
-    let user = await User.findOne({ 'socialAccounts.instagram.username': username });
-    
-    if (!user) {
-      user = new User({
-        email: `${username}@instagram.com`,
-        socialAccounts: {
-          instagram: { 
-            accessToken: access_token,
-            username 
-          }
-        }
-      });
-    } else {
-      user.socialAccounts.instagram = {
-        accessToken: access_token,
-        username
-      };
-    }
-
-    await user.save();
-
-    // Update session
-    req.session.userId = user._id;
-
-    // Force session save and wait for completion
-    await new Promise((resolve, reject) => {
-      req.session.save((err) => {
-        if (err) {
-          console.error('Session save error:', err);
-          reject(err);
-        } else {
-          console.log('Session saved successfully:', {
-            sessionID: req.sessionID,
-            userId: user._id
-          });
-          resolve();
-        }
-      });
-    });
-
-    res.redirect(`${process.env.FRONTEND_URL}?auth=success`);
-  } catch (error) {
-    console.error('Instagram callback error:', error);
-    res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
-  }
-});
-
 // Get connected accounts
 router.get('/accounts', async (req, res) => {
   try {
-    const userId = req.session?.userId;
-    console.log('Getting accounts for user:', userId);
+    const userId = req.session.userId;
     
     if (!userId) {
       return res.json({
@@ -281,47 +180,23 @@ router.get('/accounts', async (req, res) => {
         twitterUsername = data.username;
       } catch (error) {
         console.error('Twitter verification failed:', error);
+        user.socialAccounts.twitter = null;
+        await user.save();
       }
     }
 
-    // Verify Instagram credentials
-    let instagramConnected = false;
-    let instagramUsername = null;
-
-    if (user.socialAccounts?.instagram?.accessToken) {
-      try {
-        const response = await axios.get(
-          `https://graph.instagram.com/me`,
-          {
-            params: {
-              fields: 'username',
-              access_token: user.socialAccounts.instagram.accessToken
-            }
-          }
-        );
-        instagramConnected = true;
-        instagramUsername = response.data.username;
-      } catch (error) {
-        console.error('Instagram verification failed:', error);
-      }
-    }
-
-    const response = {
+    res.json({
       twitter: {
         connected: twitterConnected,
         username: twitterUsername
       },
       instagram: {
-        connected: instagramConnected,
-        username: instagramUsername
+        connected: false
       },
       facebook: {
         connected: false
       }
-    };
-
-    console.log('Sending accounts response:', response);
-    res.json(response);
+    });
   } catch (error) {
     console.error('Get accounts error:', error);
     res.status(500).json({ message: error.message });
@@ -330,24 +205,10 @@ router.get('/accounts', async (req, res) => {
 
 // Check auth status
 router.get('/status', (req, res) => {
-  try {
-    console.log('Auth status check:', {
-      sessionID: req.sessionID,
-      userId: req.session?.userId,
-      authenticated: !!req.session?.userId
-    });
-    
-    res.json({
-      authenticated: !!req.session?.userId,
-      sessionId: req.sessionID
-    });
-  } catch (error) {
-    console.error('Auth status error:', error);
-    res.status(500).json({
-      message: 'Failed to check authentication status',
-      error: process.env.NODE_ENV === 'development' ? error : undefined
-    });
-  }
+  res.json({
+    authenticated: !!req.session.userId,
+    sessionId: req.sessionID
+  });
 });
 
 export default router;
