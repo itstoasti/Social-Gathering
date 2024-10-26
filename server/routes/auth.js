@@ -20,6 +20,11 @@ router.get('/twitter', async (req, res) => {
       linkMode: 'authorize'
     });
 
+    // Initialize session if it doesn't exist
+    if (!req.session) {
+      req.session = {};
+    }
+
     // Store tokens in session
     req.session.oauth_token = oauth_token;
     req.session.oauth_token_secret = oauth_token_secret;
@@ -52,13 +57,14 @@ router.get('/twitter', async (req, res) => {
 router.get('/twitter/callback', async (req, res) => {
   try {
     const { oauth_token, oauth_verifier } = req.query;
-    const { oauth_token_secret } = req.session;
+    const { oauth_token_secret } = req.session || {};
 
     console.log('Twitter callback received:', {
       hasOAuthToken: !!oauth_token,
       hasVerifier: !!oauth_verifier,
       hasSecret: !!oauth_token_secret,
-      sessionID: req.sessionID
+      sessionID: req.sessionID,
+      session: req.session
     });
 
     if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
@@ -73,6 +79,11 @@ router.get('/twitter/callback', async (req, res) => {
     });
 
     const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
+
+    // Initialize session if it doesn't exist
+    if (!req.session) {
+      req.session = {};
+    }
 
     // Create or update user
     let user = await User.findById(req.session.userId);
@@ -153,7 +164,8 @@ router.get('/instagram/callback', async (req, res) => {
     const { code } = req.query;
     console.log('Instagram callback received:', {
       hasCode: !!code,
-      sessionID: req.sessionID
+      sessionID: req.sessionID,
+      session: req.session
     });
 
     if (!code) {
@@ -204,6 +216,11 @@ router.get('/instagram/callback', async (req, res) => {
     );
 
     const { username } = userResponse.data;
+
+    // Initialize session if it doesn't exist
+    if (!req.session) {
+      req.session = {};
+    }
 
     // Create or update user
     let user = await User.findById(req.session.userId);
@@ -256,7 +273,7 @@ router.get('/instagram/callback', async (req, res) => {
 // Get connected accounts
 router.get('/accounts', async (req, res) => {
   try {
-    const userId = req.session.userId;
+    const userId = req.session?.userId;
     console.log('Getting accounts for user:', userId);
     
     if (!userId) {
@@ -351,7 +368,8 @@ router.get('/status', (req, res) => {
     console.log('Auth status check:', {
       sessionID: req.sessionID,
       userId: req.session?.userId,
-      authenticated: !!req.session?.userId
+      authenticated: !!req.session?.userId,
+      session: req.session
     });
     
     res.json({
