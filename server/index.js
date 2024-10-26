@@ -21,8 +21,17 @@ const startServer = async () => {
     app.use(express.json({ limit: '50mb' }));
     app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-    // Trust proxy for secure cookies
+    // Trust proxy for secure cookies in production
     app.set('trust proxy', 1);
+
+    // Configure CORS before session middleware
+    app.use(cors({
+      origin: process.env.FRONTEND_URL,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+      exposedHeaders: ['Set-Cookie']
+    }));
 
     // Session store setup
     const mongoStore = MongoStore.create({
@@ -45,37 +54,38 @@ const startServer = async () => {
       store: mongoStore,
       proxy: true,
       cookie: {
-        secure: process.env.COOKIE_SECURE === 'true',
+        secure: process.env.NODE_ENV === 'production',
         httpOnly: true,
-        sameSite: process.env.COOKIE_SAME_SITE || 'none',
-        domain: process.env.COOKIE_DOMAIN,
-        maxAge: parseInt(process.env.COOKIE_MAX_AGE, 10) || 86400000
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
       }
     }));
 
-    // CORS configuration - Must be after session middleware
-    app.use(cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      exposedHeaders: ['Set-Cookie']
-    }));
+    // Add security headers
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL);
+      res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie');
+      
+      // Handle preflight requests
+      if (req.method === 'OPTIONS') {
+        return res.sendStatus(200);
+      }
+      
+      next();
+    });
 
     // Debug middleware
     app.use((req, res, next) => {
-      // Add CORS headers for all responses
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL);
-
-      // Log request details
       console.log('Request:', {
         method: req.method,
         path: req.path,
+        cookies: req.cookies,
         sessionID: req.sessionID,
         session: req.session
       });
-
       next();
     });
 
@@ -100,9 +110,7 @@ const startServer = async () => {
       console.error('Server Error:', {
         name: err.name,
         message: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-        sessionID: req.sessionID,
-        session: req.session
+        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
       });
 
       res.status(err.status || 500).json({
@@ -110,15 +118,6 @@ const startServer = async () => {
         error: process.env.NODE_ENV === 'development' ? err : {}
       });
     });
-
-    // Handle OPTIONS preflight requests
-    app.options('*', cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      exposedHeaders: ['Set-Cookie']
-    }));
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
