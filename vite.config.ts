@@ -13,9 +13,6 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
-      input: {
-        main: path.resolve(__dirname, 'index.html')
-      },
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'lucide-react'],
@@ -23,5 +20,9 @@ export default defineConfig({
         }
       }
     }
+  },
+  server: {
+    port: 5173,
+    host: true
   }
 });
