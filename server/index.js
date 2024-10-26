@@ -26,22 +26,31 @@ const startServer = async () => {
       app.set('trust proxy', 1);
     }
 
+    // CORS configuration with credentials
+    app.use(cors({
+      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+      exposedHeaders: ['Set-Cookie']
+    }));
+
     // Session store setup with enhanced security
     const sessionStore = MongoStore.create({
-      mongoUrl: process.env.MONGODB_URI,
+      mongoUrl: process.env.MONGODB_URI || 'mongodb://localhost:27017/social-crosspost',
       ttl: 24 * 60 * 60,
       autoRemove: 'native',
       touchAfter: 0,
       stringify: false,
       crypto: {
-        secret: process.env.SESSION_SECRET
+        secret: process.env.SESSION_SECRET || 'your-secret-key-here'
       }
     });
 
     // Enhanced session configuration
     app.use(session({
       name: 'social.sid',
-      secret: process.env.SESSION_SECRET,
+      secret: process.env.SESSION_SECRET || 'your-secret-key-here',
       resave: true,
       saveUninitialized: true,
       store: sessionStore,
@@ -56,18 +65,9 @@ const startServer = async () => {
       }
     }));
 
-    // CORS configuration with credentials
-    app.use(cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-      exposedHeaders: ['Set-Cookie']
-    }));
-
     // Session debug middleware
     app.use((req, res, next) => {
-      console.log('Session Debug:', {
+      console.debug('Session Debug:', {
         id: req.sessionID,
         cookie: req.session?.cookie,
         oauth: {
@@ -104,7 +104,8 @@ const startServer = async () => {
     });
 
     app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
+      console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+      console.log(`Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
