@@ -21,8 +21,17 @@ const startServer = async () => {
     app.use(express.json({ limit: '50mb' }));
     app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-    // Trust proxy for secure cookies in production
+    // Trust proxy for secure cookies
     app.set('trust proxy', 1);
+
+    // CORS configuration - Must be before session middleware
+    app.use(cors({
+      origin: process.env.FRONTEND_URL,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: ['Set-Cookie']
+    }));
 
     // Session store setup
     const mongoStore = MongoStore.create({
@@ -36,9 +45,9 @@ const startServer = async () => {
       collectionName: 'sessions'
     });
 
-    // Enhanced session configuration
+    // Session middleware
     app.use(session({
-      name: 'social.sid',
+      name: process.env.SESSION_NAME || 'social.sid',
       secret: process.env.SESSION_SECRET,
       resave: false,
       saveUninitialized: false,
@@ -54,17 +63,13 @@ const startServer = async () => {
       }
     }));
 
-    // CORS configuration
-    app.use(cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      exposedHeaders: ['Set-Cookie']
-    }));
-
     // Debug middleware
     app.use((req, res, next) => {
+      // Add CORS headers for all responses
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL);
+
+      // Log request details
       console.log('Request:', {
         method: req.method,
         path: req.path,
@@ -72,10 +77,6 @@ const startServer = async () => {
         sessionID: req.sessionID,
         session: req.session
       });
-
-      // Add CORS headers for all responses
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL);
 
       next();
     });
