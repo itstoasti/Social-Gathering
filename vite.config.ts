@@ -9,8 +9,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src')
     }
   },
-  root: '.',
-  base: './',
   build: {
     outDir: 'dist',
     sourcemap: true,
