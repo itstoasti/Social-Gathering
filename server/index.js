@@ -7,6 +7,7 @@ import authRoutes from './routes/auth.js';
 import postRoutes from './routes/posts.js';
 import { connectDB } from './config/db.js';
 import cookieParser from 'cookie-parser';
+import { errorHandler } from './middleware/errorHandler.js';
 
 dotenv.config();
 
@@ -37,7 +38,7 @@ const startServer = async () => {
       origin: FRONTEND_URL,
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
       exposedHeaders: ['Set-Cookie']
     }));
 
@@ -66,12 +67,11 @@ const startServer = async () => {
         httpOnly: true,
         sameSite: isProduction ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
-        path: '/',
         domain: isProduction ? process.env.COOKIE_DOMAIN : undefined
       }
     }));
 
-    // Debug middleware
+    // Debug middleware for development
     if (!isProduction) {
       app.use((req, res, next) => {
         console.log(`${req.method} ${req.path}`, {
@@ -101,21 +101,7 @@ const startServer = async () => {
     });
 
     // Error handling middleware
-    app.use((err, req, res, next) => {
-      console.error('Server Error:', {
-        path: req.path,
-        method: req.method,
-        name: err.name,
-        message: err.message,
-        stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
-      });
-
-      res.status(err.status || 500).json({
-        success: false,
-        message: err.message || 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? err : undefined
-      });
-    });
+    app.use(errorHandler);
 
     // Start server
     app.listen(PORT, () => {
