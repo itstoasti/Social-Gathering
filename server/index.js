@@ -13,6 +13,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // Initialize server
 const startServer = async () => {
@@ -29,21 +30,27 @@ const startServer = async () => {
       app.set('trust proxy', 1);
     }
 
-    // Configure CORS
-    app.use(cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-      exposedHeaders: ['Set-Cookie']
-    }));
+    // CORS middleware - must be before other middleware
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', FRONTEND_URL);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cookie');
+      res.header('Access-Control-Expose-Headers', 'Set-Cookie');
+
+      // Handle preflight requests
+      if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+      }
+      next();
+    });
 
     // Session store setup
     const mongoStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
-      ttl: 24 * 60 * 60, // 1 day
+      ttl: 24 * 60 * 60,
       autoRemove: 'native',
-      touchAfter: 24 * 60 * 60, // 1 day
+      touchAfter: 24 * 60 * 60,
       crypto: {
         secret: process.env.SESSION_SECRET
       },
@@ -62,14 +69,23 @@ const startServer = async () => {
         secure: isProduction,
         httpOnly: true,
         sameSite: isProduction ? 'none' : 'lax',
-        maxAge: 24 * 60 * 60 * 1000, // 1 day
+        maxAge: 24 * 60 * 60 * 1000,
         path: '/',
         domain: isProduction ? '.onrender.com' : undefined
       }
     }));
 
-    // Pre-flight OPTIONS handler
-    app.options('*', cors());
+    // Debug middleware
+    app.use((req, res, next) => {
+      console.log('Request:', {
+        method: req.method,
+        path: req.path,
+        cookies: req.cookies,
+        session: req.session,
+        headers: req.headers
+      });
+      next();
+    });
 
     // Routes
     app.use('/api/auth', authRoutes);
@@ -103,7 +119,7 @@ const startServer = async () => {
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
-      console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
+      console.log(`Frontend URL: ${FRONTEND_URL}`);
       console.log(`Base URL: ${process.env.BASE_URL}`);
     });
   } catch (error) {
