@@ -22,10 +22,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json'
   },
-  maxRedirects: 5,
-  validateStatus: (status) => {
-    return status >= 200 && status < 500;
-  }
+  maxRedirects: 5
 });
 
 // Add request interceptor
@@ -38,7 +35,6 @@ api.interceptors.request.use(
     return config;
   },
   (error) => {
-    console.error('Request Error:', error);
     return Promise.reject(new ApiError(
       'Failed to make request',
       error.response?.status,
@@ -51,8 +47,8 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => {
     if (response.status === 401) {
-      // Handle unauthorized access
       window.location.href = '/';
+      return Promise.reject(new ApiError('Unauthorized', 401));
     }
     return response;
   },
@@ -66,8 +62,8 @@ api.interceptors.response.use(
     }
 
     if (error.response.status === 401) {
-      // Handle unauthorized access
       window.location.href = '/';
+      return Promise.reject(new ApiError('Unauthorized', 401));
     }
 
     throw new ApiError(
@@ -120,8 +116,10 @@ export const auth = {
       }
       return response.data;
     } catch (error) {
-      console.error('Twitter auth error:', error);
-      throw error;
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError('Failed to get Twitter auth URL', undefined, error);
     }
   },
       
@@ -135,8 +133,10 @@ export const auth = {
       }
       return response.data;
     } catch (error) {
-      console.error('Instagram auth error:', error);
-      throw error;
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError('Failed to get Instagram auth URL', undefined, error);
     }
   },
       
