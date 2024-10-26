@@ -29,10 +29,13 @@ const api = axios.create({
 // Add request interceptor
 api.interceptors.request.use(
   (config) => {
+    console.log('API Request:', config);
+    
     // Add timestamp to prevent caching
     const timestamp = new Date().getTime();
     const separator = config.url?.includes('?') ? '&' : '?';
     config.url = `${config.url}${separator}_=${timestamp}`;
+    
     return config;
   },
   (error) => {
@@ -48,10 +51,22 @@ api.interceptors.request.use(
 // Add response interceptor
 api.interceptors.response.use(
   (response) => {
+    console.log('API Response:', response);
+    
     if (response.status === 401) {
       window.location.href = '/';
       return Promise.reject(new ApiError('Unauthorized', 401));
     }
+    
+    // Check if response has success flag
+    if (response.data?.success === false) {
+      throw new ApiError(
+        response.data.message || 'Operation failed',
+        response.status,
+        response.data
+      );
+    }
+    
     return response;
   },
   (error: AxiosError) => {
@@ -72,13 +87,18 @@ api.interceptors.response.use(
 
     // Try to parse error message from response
     let errorMessage = 'An unexpected error occurred';
-    if (error.response.data) {
-      if (typeof error.response.data === 'string') {
-        errorMessage = error.response.data;
-      } else if (typeof error.response.data.message === 'string') {
-        errorMessage = error.response.data.message;
-      } else if (error.response.data.error) {
-        errorMessage = error.response.data.error;
+    const data = error.response.data;
+    
+    if (data) {
+      if (typeof data === 'string') {
+        try {
+          const parsed = JSON.parse(data);
+          errorMessage = parsed.message || parsed.error || errorMessage;
+        } catch {
+          errorMessage = data;
+        }
+      } else if (typeof data === 'object') {
+        errorMessage = data.message || data.error || errorMessage;
       }
     }
 
@@ -124,7 +144,7 @@ export interface Post extends CreatePostData {
 export const auth = {
   getTwitterAuthUrl: async () => {
     try {
-      const response = await api.get<{ url: string }>('/auth/twitter');
+      const response = await api.get<{ success: true; url: string }>('/auth/twitter');
       const authUrl = response.data?.url;
       
       if (!authUrl) {
@@ -146,51 +166,10 @@ export const auth = {
     }
   },
       
-  getInstagramAuthUrl: async () => {
-    try {
-      const response = await api.get<{ url: string }>('/auth/instagram');
-      const authUrl = response.data?.url;
-      
-      if (!authUrl) {
-        throw new ApiError('No authorization URL received');
-      }
-
-      window.location.href = authUrl;
-      return { url: authUrl };
-    } catch (error) {
-      console.error('Instagram auth error:', error);
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      throw new ApiError(
-        'Failed to get Instagram auth URL',
-        error instanceof Error ? undefined : 500,
-        error
-      );
-    }
-  },
-      
-  getFacebookAuthUrl: async () => {
-    try {
-      const response = await api.get<{ url: string }>('/auth/facebook');
-      return response.data;
-    } catch (error) {
-      console.error('Facebook auth error:', error);
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      throw new ApiError(
-        'Failed to get Facebook auth URL',
-        error instanceof Error ? undefined : 500,
-        error
-      );
-    }
-  },
-      
   getConnectedAccounts: async () => {
     try {
-      const response = await api.get<ConnectedAccounts>('/auth/accounts');
-      return response.data;
+      const response = await api.get<{ success: true; accounts: ConnectedAccounts }>('/auth/accounts');
+      return response.data.accounts;
     } catch (error) {
       console.error('Get accounts error:', error);
       if (error instanceof ApiError) {
@@ -206,8 +185,15 @@ export const auth = {
       
   checkAuthStatus: async () => {
     try {
-      const response = await api.get<{ authenticated: boolean; sessionId: string }>('/auth/status');
-      return response.data;
+      const response = await api.get<{
+        success: true;
+        authenticated: boolean;
+        sessionId: string;
+      }>('/auth/status');
+      return {
+        authenticated: response.data.authenticated,
+        sessionId: response.data.sessionId
+      };
     } catch (error) {
       console.error('Auth status error:', error);
       if (error instanceof ApiError) {
@@ -225,8 +211,8 @@ export const auth = {
 export const posts = {
   create: async (postData: CreatePostData) => {
     try {
-      const response = await api.post<Post>('/posts', postData);
-      return response.data;
+      const response = await api.post<{ success: true; post: Post }>('/posts', postData);
+      return response.data.post;
     } catch (error) {
       console.error('Create post error:', error);
       if (error instanceof ApiError) {
@@ -242,8 +228,8 @@ export const posts = {
   
   getAll: async () => {
     try {
-      const response = await api.get<Post[]>('/posts');
-      return response.data;
+      const response = await api.get<{ success: true; posts: Post[] }>('/posts');
+      return response.data.posts;
     } catch (error) {
       console.error('Get posts error:', error);
       if (error instanceof ApiError) {
@@ -259,8 +245,8 @@ export const posts = {
 
   update: async (id: string, data: Partial<CreatePostData>) => {
     try {
-      const response = await api.put<Post>(`/posts/${id}`, data);
-      return response.data;
+      const response = await api.put<{ success: true; post: Post }>(`/posts/${id}`, data);
+      return response.data.post;
     } catch (error) {
       console.error('Update post error:', error);
       if (error instanceof ApiError) {
@@ -276,7 +262,7 @@ export const posts = {
 
   delete: async (id: string) => {
     try {
-      const response = await api.delete<{ message: string }>(`/posts/${id}`);
+      const response = await api.delete<{ success: true; message: string }>(`/posts/${id}`);
       return response.data;
     } catch (error) {
       console.error('Delete post error:', error);
