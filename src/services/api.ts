@@ -1,6 +1,5 @@
 import axios, { AxiosError } from 'axios';
 
-// Always use the production API URL
 const baseURL = 'https://social-gathering.onrender.com/api';
 
 export class ApiError extends Error {
@@ -26,7 +25,6 @@ const api = axios.create({
   maxBodyLength: Infinity
 });
 
-// Add request interceptor for debugging
 api.interceptors.request.use(
   config => {
     console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
@@ -41,7 +39,6 @@ api.interceptors.request.use(
   }
 );
 
-// Add response interceptor for better error handling
 api.interceptors.response.use(
   response => {
     console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
@@ -50,7 +47,7 @@ api.interceptors.response.use(
     });
     return response;
   },
-  (error: AxiosError) => {
+  (error: AxiosError<{ message?: string }>) => {
     const apiError = new ApiError(
       error.response?.data?.message || error.message || 'An unexpected error occurred',
       error.response?.status,
@@ -82,7 +79,6 @@ export interface ConnectedAccounts {
   facebook: ConnectedAccount;
 }
 
-// Retry mechanism for failed requests
 const withRetry = async (fn: () => Promise<any>, retries = 2, delay = 1000) => {
   try {
     return await fn();
