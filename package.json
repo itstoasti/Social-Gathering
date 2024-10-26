@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
     "dev:frontend": "vite",
-    "dev:backend": "nodemon server/index.js",
+    "dev:backend": "nodemon --watch server server/index.js",
     "build": "tsc && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
