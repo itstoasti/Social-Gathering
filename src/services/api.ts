@@ -22,7 +22,10 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json'
   },
-  maxRedirects: 5
+  maxRedirects: 5,
+  validateStatus: (status) => {
+    return status >= 200 && status < 500;
+  }
 });
 
 // Add request interceptor
@@ -32,9 +35,18 @@ api.interceptors.request.use(
     const timestamp = new Date().getTime();
     const separator = config.url?.includes('?') ? '&' : '?';
     config.url = `${config.url}${separator}_=${timestamp}`;
+
+    console.log('API Request:', {
+      method: config.method,
+      url: config.url,
+      baseURL: config.baseURL,
+      headers: config.headers,
+      withCredentials: config.withCredentials
+    });
     return config;
   },
   (error) => {
+    console.error('Request Error:', error);
     return Promise.reject(new ApiError(
       'Failed to make request',
       error.response?.status,
@@ -46,24 +58,27 @@ api.interceptors.request.use(
 // Add response interceptor
 api.interceptors.response.use(
   (response) => {
-    if (response.status === 401) {
-      window.location.href = '/';
-      return Promise.reject(new ApiError('Unauthorized', 401));
-    }
+    console.log('API Response:', {
+      status: response.status,
+      headers: response.headers,
+      data: response.data
+    });
     return response;
   },
   (error: AxiosError) => {
+    console.error('Response Error:', {
+      status: error.response?.status,
+      data: error.response?.data,
+      message: error.message,
+      headers: error.response?.headers
+    });
+
     if (!error.response) {
       throw new ApiError(
         'Network Error - Please check your connection',
         0,
         error
       );
-    }
-
-    if (error.response.status === 401) {
-      window.location.href = '/';
-      return Promise.reject(new ApiError('Unauthorized', 401));
     }
 
     throw new ApiError(
@@ -116,10 +131,8 @@ export const auth = {
       }
       return response.data;
     } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      throw new ApiError('Failed to get Twitter auth URL', undefined, error);
+      console.error('Twitter auth error:', error);
+      throw error;
     }
   },
       
@@ -133,10 +146,8 @@ export const auth = {
       }
       return response.data;
     } catch (error) {
-      if (error instanceof ApiError) {
-        throw error;
-      }
-      throw new ApiError('Failed to get Instagram auth URL', undefined, error);
+      console.error('Instagram auth error:', error);
+      throw error;
     }
   },
       
@@ -149,11 +160,8 @@ export const auth = {
       .then(response => response.data),
       
   checkAuthStatus: () => 
-    api.get<{ authenticated: boolean; sessionId: string }>('/auth/status')
-      .then(response => {
-        console.log('Auth status:', response.data);
-        return response.data;
-      })
+    api.get<{ authenticated: boolean }>('/auth/status')
+      .then(response => response.data)
 };
 
 export const posts = {
