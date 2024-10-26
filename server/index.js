@@ -24,21 +24,12 @@ const startServer = async () => {
     // Trust proxy for secure cookies
     app.set('trust proxy', 1);
 
-    // CORS configuration - Must be before session middleware
-    app.use(cors({
-      origin: process.env.FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
-      exposedHeaders: ['Set-Cookie']
-    }));
-
     // Session store setup
     const mongoStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
-      ttl: 24 * 60 * 60, // 1 day
+      ttl: parseInt(process.env.SESSION_TTL, 10) || 86400,
       autoRemove: 'native',
-      touchAfter: 24 * 60 * 60, // 1 day
+      touchAfter: parseInt(process.env.SESSION_TOUCH_AFTER, 10) || 86400,
       crypto: {
         secret: process.env.SESSION_SECRET
       },
@@ -53,14 +44,22 @@ const startServer = async () => {
       saveUninitialized: false,
       store: mongoStore,
       proxy: true,
-      rolling: true,
       cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: process.env.COOKIE_SECURE === 'true',
         httpOnly: true,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
-        maxAge: 24 * 60 * 60 * 1000 // 1 day
+        sameSite: process.env.COOKIE_SAME_SITE || 'none',
+        domain: process.env.COOKIE_DOMAIN,
+        maxAge: parseInt(process.env.COOKIE_MAX_AGE, 10) || 86400000
       }
+    }));
+
+    // CORS configuration - Must be after session middleware
+    app.use(cors({
+      origin: process.env.FRONTEND_URL,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: ['Set-Cookie']
     }));
 
     // Debug middleware
@@ -73,7 +72,6 @@ const startServer = async () => {
       console.log('Request:', {
         method: req.method,
         path: req.path,
-        cookies: req.cookies,
         sessionID: req.sessionID,
         session: req.session
       });
@@ -112,6 +110,15 @@ const startServer = async () => {
         error: process.env.NODE_ENV === 'development' ? err : {}
       });
     });
+
+    // Handle OPTIONS preflight requests
+    app.options('*', cors({
+      origin: process.env.FRONTEND_URL,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+      exposedHeaders: ['Set-Cookie']
+    }));
 
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
