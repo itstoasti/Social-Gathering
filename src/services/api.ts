@@ -1,18 +1,8 @@
 import axios, { AxiosError } from 'axios';
 
-const baseURL = 'https://social-gathering.onrender.com/api';
-
-export class ApiError extends Error {
-  status?: number;
-  details?: unknown;
-
-  constructor(message: string, status?: number, details?: unknown) {
-    super(message);
-    this.name = 'ApiError';
-    this.status = status;
-    this.details = details;
-  }
-}
+const baseURL = import.meta.env.PROD 
+  ? 'https://social-gathering.onrender.com/api'
+  : 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL,
@@ -27,7 +17,7 @@ const api = axios.create({
 
 api.interceptors.request.use(
   config => {
-    console.log(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
+    console.debug(`[API Request] ${config.method?.toUpperCase()} ${config.url}`, {
       headers: config.headers,
       data: config.data
     });
@@ -41,7 +31,7 @@ api.interceptors.request.use(
 
 api.interceptors.response.use(
   response => {
-    console.log(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
+    console.debug(`[API Response] ${response.config.method?.toUpperCase()} ${response.config.url}`, {
       status: response.status,
       data: response.data
     });
@@ -66,6 +56,18 @@ api.interceptors.response.use(
     return Promise.reject(apiError);
   }
 );
+
+export class ApiError extends Error {
+  status?: number;
+  details?: unknown;
+
+  constructor(message: string, status?: number, details?: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.details = details;
+  }
+}
 
 export interface ConnectedAccount {
   username?: string;
@@ -109,7 +111,7 @@ export const auth = {
       .then(response => response.data)),
       
   checkAuthStatus: () => 
-    withRetry(() => api.get<{ authenticated: boolean }>('/auth/status')
+    withRetry(() => api.get<{ authenticated: boolean; sessionId: string }>('/auth/status')
       .then(response => response.data)),
       
   debugSession: () => 
