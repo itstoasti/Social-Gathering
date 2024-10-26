@@ -5,51 +5,8 @@ import User from '../models/User.js';
 
 const router = express.Router();
 
-// Error wrapper with improved error handling
-const asyncHandler = (fn) => (req, res, next) => {
-  Promise.resolve(fn(req, res, next)).catch((error) => {
-    console.error('Route Error:', {
-      name: error.name,
-      message: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-      sessionID: req.sessionID,
-      session: req.session
-    });
-
-    // Handle specific error types
-    if (error.name === 'SyntaxError' && error.message.includes('JSON')) {
-      return res.status(400).json({
-        message: 'Invalid JSON data',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined
-      });
-    }
-
-    // Handle Twitter API errors
-    if (error.name === 'ApiResponseError') {
-      return res.status(error.code || 500).json({
-        message: error.message,
-        error: process.env.NODE_ENV === 'development' ? error : undefined
-      });
-    }
-
-    // Handle Axios errors
-    if (error.isAxiosError) {
-      return res.status(error.response?.status || 500).json({
-        message: error.response?.data?.message || error.message,
-        error: process.env.NODE_ENV === 'development' ? error.response?.data : undefined
-      });
-    }
-
-    // Default error response
-    res.status(500).json({
-      message: error.message || 'Internal server error',
-      error: process.env.NODE_ENV === 'development' ? error : undefined
-    });
-  });
-};
-
 // Twitter OAuth
-router.get('/twitter', asyncHandler(async (req, res) => {
+router.get('/twitter', async (req, res) => {
   try {
     const client = new TwitterApi({
       appKey: process.env.TWITTER_API_KEY,
@@ -74,10 +31,10 @@ router.get('/twitter', asyncHandler(async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully:', {
+          console.log('Session saved:', {
             sessionID: req.sessionID,
             hasOAuthToken: !!oauth_token,
-            session: req.session
+            hasOAuthSecret: !!oauth_token_secret
           });
           resolve();
         }
@@ -87,12 +44,12 @@ router.get('/twitter', asyncHandler(async (req, res) => {
     res.json({ url });
   } catch (error) {
     console.error('Twitter auth error:', error);
-    throw error;
+    res.status(500).json({ message: error.message });
   }
-}));
+});
 
 // Twitter OAuth callback
-router.get('/twitter/callback', asyncHandler(async (req, res) => {
+router.get('/twitter/callback', async (req, res) => {
   try {
     const { oauth_token, oauth_verifier } = req.query;
     const { oauth_token_secret } = req.session;
@@ -101,8 +58,7 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
       hasOAuthToken: !!oauth_token,
       hasVerifier: !!oauth_verifier,
       hasSecret: !!oauth_token_secret,
-      sessionID: req.sessionID,
-      session: req.session
+      sessionID: req.sessionID
     });
 
     if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
@@ -156,10 +112,9 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully:', {
+          console.log('Session saved:', {
             sessionID: req.sessionID,
-            userId: user._id,
-            session: req.session
+            userId: user._id
           });
           resolve();
         }
@@ -171,10 +126,10 @@ router.get('/twitter/callback', asyncHandler(async (req, res) => {
     console.error('Twitter callback error:', error);
     res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
   }
-}));
+});
 
 // Instagram OAuth
-router.get('/instagram', asyncHandler(async (req, res) => {
+router.get('/instagram', async (req, res) => {
   try {
     const redirectUri = process.env.IG_REDIRECT_URI;
     console.log('Instagram redirect URI:', redirectUri);
@@ -188,20 +143,17 @@ router.get('/instagram', asyncHandler(async (req, res) => {
     res.json({ url: instagramAuthUrl });
   } catch (error) {
     console.error('Instagram auth error:', error);
-    throw error;
+    res.status(500).json({ message: error.message });
   }
-}));
+});
 
 // Instagram OAuth callback
-router.get('/instagram/callback', asyncHandler(async (req, res) => {
+router.get('/instagram/callback', async (req, res) => {
   try {
     const { code } = req.query;
     console.log('Instagram callback received:', {
-      code: req.query.code ? 'present' : 'missing',
-      error: req.query.error,
-      errorReason: req.query.error_reason,
-      errorDescription: req.query.error_description,
-      session: req.session
+      hasCode: !!code,
+      sessionID: req.sessionID
     });
 
     if (!code) {
@@ -285,10 +237,9 @@ router.get('/instagram/callback', asyncHandler(async (req, res) => {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved successfully:', {
+          console.log('Session saved:', {
             sessionID: req.sessionID,
-            userId: user._id,
-            session: req.session
+            userId: user._id
           });
           resolve();
         }
@@ -300,10 +251,10 @@ router.get('/instagram/callback', asyncHandler(async (req, res) => {
     console.error('Instagram callback error:', error);
     res.redirect(`${process.env.FRONTEND_URL}?auth=error&message=${encodeURIComponent(error.message)}`);
   }
-}));
+});
 
 // Get connected accounts
-router.get('/accounts', asyncHandler(async (req, res) => {
+router.get('/accounts', async (req, res) => {
   try {
     const userId = req.session.userId;
     console.log('Getting accounts for user:', userId);
@@ -390,9 +341,9 @@ router.get('/accounts', asyncHandler(async (req, res) => {
     res.json(response);
   } catch (error) {
     console.error('Get accounts error:', error);
-    throw error;
+    res.status(500).json({ message: error.message });
   }
-}));
+});
 
 // Check auth status
 router.get('/status', (req, res) => {
@@ -400,8 +351,7 @@ router.get('/status', (req, res) => {
     console.log('Auth status check:', {
       sessionID: req.sessionID,
       userId: req.session?.userId,
-      authenticated: !!req.session?.userId,
-      session: req.session
+      authenticated: !!req.session?.userId
     });
     
     res.json({
