@@ -7,7 +7,7 @@ import authRoutes from './routes/auth.js';
 import postRoutes from './routes/posts.js';
 import { connectDB } from './config/db.js';
 import cookieParser from 'cookie-parser';
-import { errorHandler } from './middleware/errorHandler.js';
+import { errorHandler } from './middleware/index.js';
 
 dotenv.config();
 
