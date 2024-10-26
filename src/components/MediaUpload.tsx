@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { Image, Video } from 'lucide-react';
+import { Image } from 'lucide-react';
 
 interface MediaUploadProps {
   onFileSelect: (file: File) => void;
