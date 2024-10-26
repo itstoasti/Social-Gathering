@@ -9,12 +9,14 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src')
     }
   },
+  root: '.',
+  base: '/',
   build: {
     outDir: 'dist',
     sourcemap: true,
     rollupOptions: {
       input: {
-        main: path.resolve(__dirname, 'index.html')
+        app: './index.html'
       },
       output: {
         manualChunks: {
