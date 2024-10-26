@@ -20,12 +20,10 @@ const api = axios.create({
   baseURL,
   withCredentials: true,
   headers: {
-    'Content-Type': 'application/json'
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
   },
-  maxRedirects: 5,
-  validateStatus: (status) => {
-    return status >= 200 && status < 500;
-  }
+  maxRedirects: 5
 });
 
 // Add request interceptor
@@ -35,20 +33,12 @@ api.interceptors.request.use(
     const timestamp = new Date().getTime();
     const separator = config.url?.includes('?') ? '&' : '?';
     config.url = `${config.url}${separator}_=${timestamp}`;
-
-    console.log('API Request:', {
-      method: config.method,
-      url: config.url,
-      baseURL: config.baseURL,
-      headers: config.headers,
-      withCredentials: config.withCredentials
-    });
     return config;
   },
   (error) => {
     console.error('Request Error:', error);
     return Promise.reject(new ApiError(
-      'Failed to make request',
+      error.message || 'Failed to make request',
       error.response?.status,
       error
     ));
@@ -58,20 +48,14 @@ api.interceptors.request.use(
 // Add response interceptor
 api.interceptors.response.use(
   (response) => {
-    console.log('API Response:', {
-      status: response.status,
-      headers: response.headers,
-      data: response.data
-    });
+    if (response.status === 401) {
+      window.location.href = '/';
+      return Promise.reject(new ApiError('Unauthorized', 401));
+    }
     return response;
   },
   (error: AxiosError) => {
-    console.error('Response Error:', {
-      status: error.response?.status,
-      data: error.response?.data,
-      message: error.message,
-      headers: error.response?.headers
-    });
+    console.error('Response Error:', error);
 
     if (!error.response) {
       throw new ApiError(
@@ -81,10 +65,27 @@ api.interceptors.response.use(
       );
     }
 
+    if (error.response.status === 401) {
+      window.location.href = '/';
+      return Promise.reject(new ApiError('Unauthorized', 401));
+    }
+
+    // Try to parse error message from response
+    let errorMessage = 'An unexpected error occurred';
+    if (error.response.data) {
+      if (typeof error.response.data === 'string') {
+        errorMessage = error.response.data;
+      } else if (typeof error.response.data.message === 'string') {
+        errorMessage = error.response.data.message;
+      } else if (error.response.data.error) {
+        errorMessage = error.response.data.error;
+      }
+    }
+
     throw new ApiError(
-      error.response?.data?.message || error.message,
-      error.response?.status,
-      error.response?.data
+      errorMessage,
+      error.response.status,
+      error.response.data
     );
   }
 );
@@ -124,62 +125,171 @@ export const auth = {
   getTwitterAuthUrl: async () => {
     try {
       const response = await api.get<{ url: string }>('/auth/twitter');
-      if (response.data?.url) {
-        window.location.href = response.data.url;
-      } else {
-        throw new Error('No authorization URL received');
+      const authUrl = response.data?.url;
+      
+      if (!authUrl) {
+        throw new ApiError('No authorization URL received');
       }
-      return response.data;
+
+      window.location.href = authUrl;
+      return { url: authUrl };
     } catch (error) {
       console.error('Twitter auth error:', error);
-      throw error;
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to get Twitter auth URL',
+        error instanceof Error ? undefined : 500,
+        error
+      );
     }
   },
       
   getInstagramAuthUrl: async () => {
     try {
       const response = await api.get<{ url: string }>('/auth/instagram');
-      if (response.data?.url) {
-        window.location.href = response.data.url;
-      } else {
-        throw new Error('No authorization URL received');
+      const authUrl = response.data?.url;
+      
+      if (!authUrl) {
+        throw new ApiError('No authorization URL received');
       }
-      return response.data;
+
+      window.location.href = authUrl;
+      return { url: authUrl };
     } catch (error) {
       console.error('Instagram auth error:', error);
-      throw error;
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to get Instagram auth URL',
+        error instanceof Error ? undefined : 500,
+        error
+      );
     }
   },
       
-  getFacebookAuthUrl: () => 
-    api.get<{ url: string }>('/auth/facebook')
-      .then(response => response.data),
+  getFacebookAuthUrl: async () => {
+    try {
+      const response = await api.get<{ url: string }>('/auth/facebook');
+      return response.data;
+    } catch (error) {
+      console.error('Facebook auth error:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to get Facebook auth URL',
+        error instanceof Error ? undefined : 500,
+        error
+      );
+    }
+  },
       
-  getConnectedAccounts: () => 
-    api.get<ConnectedAccounts>('/auth/accounts')
-      .then(response => response.data),
+  getConnectedAccounts: async () => {
+    try {
+      const response = await api.get<ConnectedAccounts>('/auth/accounts');
+      return response.data;
+    } catch (error) {
+      console.error('Get accounts error:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to get connected accounts',
+        error instanceof Error ? undefined : 500,
+        error
+      );
+    }
+  },
       
-  checkAuthStatus: () => 
-    api.get<{ authenticated: boolean }>('/auth/status')
-      .then(response => response.data)
+  checkAuthStatus: async () => {
+    try {
+      const response = await api.get<{ authenticated: boolean; sessionId: string }>('/auth/status');
+      return response.data;
+    } catch (error) {
+      console.error('Auth status error:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to check auth status',
+        error instanceof Error ? undefined : 500,
+        error
+      );
+    }
+  }
 };
 
 export const posts = {
-  create: (postData: CreatePostData) => 
-    api.post<Post>('/posts', postData)
-      .then(response => response.data),
+  create: async (postData: CreatePostData) => {
+    try {
+      const response = await api.post<Post>('/posts', postData);
+      return response.data;
+    } catch (error) {
+      console.error('Create post error:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to create post',
+        error instanceof Error ? undefined : 500,
+        error
+      );
+    }
+  },
   
-  getAll: () => 
-    api.get<Post[]>('/posts')
-      .then(response => response.data),
+  getAll: async () => {
+    try {
+      const response = await api.get<Post[]>('/posts');
+      return response.data;
+    } catch (error) {
+      console.error('Get posts error:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to get posts',
+        error instanceof Error ? undefined : 500,
+        error
+      );
+    }
+  },
 
-  update: (id: string, data: Partial<CreatePostData>) =>
-    api.put<Post>(`/posts/${id}`, data)
-      .then(response => response.data),
+  update: async (id: string, data: Partial<CreatePostData>) => {
+    try {
+      const response = await api.put<Post>(`/posts/${id}`, data);
+      return response.data;
+    } catch (error) {
+      console.error('Update post error:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to update post',
+        error instanceof Error ? undefined : 500,
+        error
+      );
+    }
+  },
 
-  delete: (id: string) =>
-    api.delete<{ message: string }>(`/posts/${id}`)
-      .then(response => response.data)
+  delete: async (id: string) => {
+    try {
+      const response = await api.delete<{ message: string }>(`/posts/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Delete post error:', error);
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(
+        'Failed to delete post',
+        error instanceof Error ? undefined : 500,
+        error
+      );
+    }
+  }
 };
 
 export default api;
