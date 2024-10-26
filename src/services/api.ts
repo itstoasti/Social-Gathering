@@ -31,6 +31,11 @@ const api = axios.create({
 // Add request interceptor
 api.interceptors.request.use(
   (config) => {
+    // Add timestamp to prevent caching
+    const timestamp = new Date().getTime();
+    const separator = config.url?.includes('?') ? '&' : '?';
+    config.url = `${config.url}${separator}_=${timestamp}`;
+
     console.log('API Request:', {
       method: config.method,
       url: config.url,
