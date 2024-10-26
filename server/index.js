@@ -18,14 +18,21 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 // Initialize server
 const startServer = async () => {
   try {
+    // Connect to MongoDB first
     await connectDB();
+    console.log('MongoDB connected successfully');
 
     // Trust proxy for secure cookies in production
     if (isProduction) {
       app.set('trust proxy', 1);
     }
 
-    // CORS configuration - MUST come before other middleware
+    // Basic middleware
+    app.use(express.json({ limit: '50mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+    app.use(cookieParser(process.env.SESSION_SECRET));
+
+    // CORS configuration
     app.use(cors({
       origin: FRONTEND_URL,
       credentials: true,
@@ -33,11 +40,6 @@ const startServer = async () => {
       allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
       exposedHeaders: ['Set-Cookie']
     }));
-
-    // Basic middleware
-    app.use(cookieParser(process.env.SESSION_SECRET));
-    app.use(express.json({ limit: '50mb' }));
-    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
     // Session store setup
     const mongoStore = MongoStore.create({
@@ -109,6 +111,7 @@ const startServer = async () => {
       });
     });
 
+    // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
       console.log(`Frontend URL: ${FRONTEND_URL}`);
