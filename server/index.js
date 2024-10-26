@@ -30,14 +30,17 @@ const startServer = async () => {
       app.set('trust proxy', 1);
     }
 
-    // CORS configuration
+    // CORS configuration - MUST come before session middleware
     app.use(cors({
-      origin: FRONTEND_URL,
+      origin: [FRONTEND_URL],
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
       exposedHeaders: ['Set-Cookie']
     }));
+
+    // Pre-flight requests
+    app.options('*', cors());
 
     // Session store setup
     const mongoStore = MongoStore.create({
@@ -65,9 +68,18 @@ const startServer = async () => {
         sameSite: isProduction ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
         path: '/',
-        domain: isProduction ? process.env.COOKIE_DOMAIN : undefined
+        domain: isProduction ? '.onrender.com' : undefined
       }
     }));
+
+    // Add headers middleware
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Origin', FRONTEND_URL);
+      res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin,X-Requested-With,Content-Type,Accept,Authorization,Cookie');
+      next();
+    });
 
     // Debug middleware
     app.use((req, res, next) => {
