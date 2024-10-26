@@ -18,28 +18,32 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 // Initialize server
 const startServer = async () => {
   try {
-    // Connect to MongoDB first
     await connectDB();
-    console.log('MongoDB connected successfully');
+
+    // Basic middleware
+    app.use(cookieParser(process.env.SESSION_SECRET));
+    app.use(express.json({ limit: '50mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
     // Trust proxy for secure cookies in production
     if (isProduction) {
       app.set('trust proxy', 1);
     }
 
-    // Basic middleware
-    app.use(express.json({ limit: '50mb' }));
-    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-    app.use(cookieParser(process.env.SESSION_SECRET));
+    // CORS middleware - must be before other middleware
+    app.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', FRONTEND_URL);
+      res.header('Access-Control-Allow-Credentials', 'true');
+      res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cookie');
+      res.header('Access-Control-Expose-Headers', 'Set-Cookie');
 
-    // CORS configuration
-    app.use(cors({
-      origin: FRONTEND_URL,
-      credentials: true,
-      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
-      exposedHeaders: ['Set-Cookie']
-    }));
+      // Handle preflight requests
+      if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+      }
+      next();
+    });
 
     // Session store setup
     const mongoStore = MongoStore.create({
@@ -67,16 +71,18 @@ const startServer = async () => {
         sameSite: isProduction ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
         path: '/',
-        domain: isProduction ? process.env.COOKIE_DOMAIN : undefined
+        domain: isProduction ? '.onrender.com' : undefined
       }
     }));
 
     // Debug middleware
     app.use((req, res, next) => {
-      console.log(`${req.method} ${req.path}`, {
+      console.log('Request:', {
+        method: req.method,
+        path: req.path,
         cookies: req.cookies,
-        sessionID: req.sessionID,
-        session: req.session
+        session: req.session,
+        headers: req.headers
       });
       next();
     });
@@ -111,7 +117,6 @@ const startServer = async () => {
       });
     });
 
-    // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
       console.log(`Frontend URL: ${FRONTEND_URL}`);
