@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { X, Instagram, Facebook, AlertCircle } from 'lucide-react';
 import { auth, type ConnectedAccounts, type ApiError } from '../services/api';
 
@@ -34,7 +34,6 @@ function SocialLogin() {
 
       if (authStatus === 'success') {
         await fetchConnectedAccounts();
-        // Clear URL parameters
         window.history.replaceState({}, document.title, window.location.pathname);
       } else if (authStatus === 'error') {
         setError('Authentication failed. Please try again.');
@@ -48,7 +47,6 @@ function SocialLogin() {
 
   const fetchConnectedAccounts = async () => {
     try {
-      // First check auth status
       const authStatus = await auth.checkAuthStatus();
       console.log('Auth status:', authStatus);
 
@@ -57,7 +55,6 @@ function SocialLogin() {
         return;
       }
 
-      // Then get connected accounts
       const connectedAccounts = await auth.getConnectedAccounts();
       console.log('Connected accounts:', connectedAccounts);
       
