@@ -18,32 +18,28 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 // Initialize server
 const startServer = async () => {
   try {
+    // Connect to MongoDB first
     await connectDB();
-
-    // Basic middleware
-    app.use(cookieParser(process.env.SESSION_SECRET));
-    app.use(express.json({ limit: '50mb' }));
-    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+    console.log('MongoDB connected successfully');
 
     // Trust proxy for secure cookies in production
     if (isProduction) {
       app.set('trust proxy', 1);
     }
 
-    // CORS middleware - must be before other middleware
-    app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Origin', FRONTEND_URL);
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, Cookie');
-      res.header('Access-Control-Expose-Headers', 'Set-Cookie');
+    // Basic middleware
+    app.use(express.json({ limit: '50mb' }));
+    app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+    app.use(cookieParser(process.env.SESSION_SECRET));
 
-      // Handle preflight requests
-      if (req.method === 'OPTIONS') {
-        return res.status(200).end();
-      }
-      next();
-    });
+    // CORS configuration
+    app.use(cors({
+      origin: FRONTEND_URL,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
+      exposedHeaders: ['Set-Cookie']
+    }));
 
     // Session store setup
     const mongoStore = MongoStore.create({
@@ -71,21 +67,21 @@ const startServer = async () => {
         sameSite: isProduction ? 'none' : 'lax',
         maxAge: 24 * 60 * 60 * 1000,
         path: '/',
-        domain: isProduction ? '.onrender.com' : undefined
+        domain: isProduction ? process.env.COOKIE_DOMAIN : undefined
       }
     }));
 
     // Debug middleware
-    app.use((req, res, next) => {
-      console.log('Request:', {
-        method: req.method,
-        path: req.path,
-        cookies: req.cookies,
-        session: req.session,
-        headers: req.headers
+    if (!isProduction) {
+      app.use((req, res, next) => {
+        console.log(`${req.method} ${req.path}`, {
+          cookies: req.cookies,
+          sessionID: req.sessionID,
+          session: req.session
+        });
+        next();
       });
-      next();
-    });
+    }
 
     // Routes
     app.use('/api/auth', authRoutes);
@@ -93,7 +89,8 @@ const startServer = async () => {
 
     // Health check endpoint
     app.get('/api/health', (req, res) => {
-      res.status(200).json({ 
+      res.json({ 
+        success: true,
         status: 'ok',
         env: process.env.NODE_ENV,
         session: {
@@ -106,17 +103,21 @@ const startServer = async () => {
     // Error handling middleware
     app.use((err, req, res, next) => {
       console.error('Server Error:', {
+        path: req.path,
+        method: req.method,
         name: err.name,
         message: err.message,
         stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
       });
 
       res.status(err.status || 500).json({
+        success: false,
         message: err.message || 'Internal server error',
-        error: process.env.NODE_ENV === 'development' ? err : {}
+        error: process.env.NODE_ENV === 'development' ? err : undefined
       });
     });
 
+    // Start server
     app.listen(PORT, () => {
       console.log(`Server running on port ${PORT} in ${process.env.NODE_ENV} mode`);
       console.log(`Frontend URL: ${FRONTEND_URL}`);
