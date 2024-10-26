@@ -48,7 +48,7 @@ api.interceptors.response.use(
       if (error.code === 'ECONNABORTED') {
         apiError.message = 'Request timed out. Please try again.';
       } else {
-        apiError.message = 'No response received from server. Please check your connection.';
+        apiError.message = 'Backend server is not running. Please start the server with `npm run dev`.';
       }
     }
 
