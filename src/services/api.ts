@@ -33,14 +33,17 @@ api.interceptors.request.use(
       url: config.url,
       baseURL: config.baseURL,
       headers: config.headers,
-      withCredentials: config.withCredentials,
-      data: config.data
+      withCredentials: config.withCredentials
     });
     return config;
   },
   (error) => {
     console.error('Request Error:', error);
-    return Promise.reject(error);
+    return Promise.reject(new ApiError(
+      'Failed to make request',
+      error.response?.status,
+      error
+    ));
   }
 );
 
@@ -115,7 +118,11 @@ export const auth = {
   getTwitterAuthUrl: async () => {
     try {
       const response = await api.get<{ url: string }>('/auth/twitter');
-      window.location.href = response.data.url;
+      if (response.data?.url) {
+        window.location.href = response.data.url;
+      } else {
+        throw new Error('No authorization URL received');
+      }
       return response.data;
     } catch (error) {
       console.error('Twitter auth error:', error);
@@ -126,7 +133,11 @@ export const auth = {
   getInstagramAuthUrl: async () => {
     try {
       const response = await api.get<{ url: string }>('/auth/instagram');
-      window.location.href = response.data.url;
+      if (response.data?.url) {
+        window.location.href = response.data.url;
+      } else {
+        throw new Error('No authorization URL received');
+      }
       return response.data;
     } catch (error) {
       console.error('Instagram auth error:', error);
