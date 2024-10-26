@@ -20,23 +20,21 @@ router.get('/twitter', async (req, res) => {
       linkMode: 'authorize'
     });
 
-    // Initialize session if it doesn't exist
-    if (!req.session) {
-      req.session = {};
-    }
-
     // Store tokens in session
-    req.session.oauth_token = oauth_token;
-    req.session.oauth_token_secret = oauth_token_secret;
+    req.session = {
+      ...req.session,
+      oauth_token,
+      oauth_token_secret
+    };
 
-    // Force session save
+    // Force session save and wait for completion
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved:', {
+          console.log('Session saved successfully:', {
             sessionID: req.sessionID,
             hasOAuthToken: !!oauth_token,
             hasOAuthSecret: !!oauth_token_secret
@@ -63,8 +61,7 @@ router.get('/twitter/callback', async (req, res) => {
       hasOAuthToken: !!oauth_token,
       hasVerifier: !!oauth_verifier,
       hasSecret: !!oauth_token_secret,
-      sessionID: req.sessionID,
-      session: req.session
+      sessionID: req.sessionID
     });
 
     if (!oauth_token || !oauth_verifier || !oauth_token_secret) {
@@ -80,13 +77,9 @@ router.get('/twitter/callback', async (req, res) => {
 
     const { accessToken, accessSecret, screenName } = await client.login(oauth_verifier);
 
-    // Initialize session if it doesn't exist
-    if (!req.session) {
-      req.session = {};
-    }
-
     // Create or update user
-    let user = await User.findById(req.session.userId);
+    let user = await User.findOne({ 'socialAccounts.twitter.username': screenName });
+    
     if (!user) {
       user = new User({
         email: `${screenName}@twitter.com`,
@@ -99,31 +92,28 @@ router.get('/twitter/callback', async (req, res) => {
         }
       });
     } else {
-      user.socialAccounts = {
-        ...user.socialAccounts,
-        twitter: { 
-          accessToken, 
-          accessSecret, 
-          username: screenName 
-        }
+      user.socialAccounts.twitter = {
+        accessToken,
+        accessSecret,
+        username: screenName
       };
     }
 
     await user.save();
-    req.session.userId = user._id;
 
-    // Clear OAuth tokens
+    // Update session
+    req.session.userId = user._id;
     delete req.session.oauth_token;
     delete req.session.oauth_token_secret;
 
-    // Force session save
+    // Force session save and wait for completion
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved:', {
+          console.log('Session saved successfully:', {
             sessionID: req.sessionID,
             userId: user._id
           });
@@ -164,8 +154,7 @@ router.get('/instagram/callback', async (req, res) => {
     const { code } = req.query;
     console.log('Instagram callback received:', {
       hasCode: !!code,
-      sessionID: req.sessionID,
-      session: req.session
+      sessionID: req.sessionID
     });
 
     if (!code) {
@@ -190,71 +179,52 @@ router.get('/instagram/callback', async (req, res) => {
 
     const { access_token, user_id } = tokenResponse.data;
 
-    // Get long-lived access token
-    const longLivedTokenResponse = await axios.get(
-      'https://graph.instagram.com/access_token',
-      {
-        params: {
-          grant_type: 'ig_exchange_token',
-          client_secret: process.env.IG_CLIENT_SECRET,
-          access_token
-        }
-      }
-    );
-
-    const longLivedToken = longLivedTokenResponse.data.access_token;
-
     // Get user info
     const userResponse = await axios.get(
       `https://graph.instagram.com/me`,
       {
         params: {
           fields: 'id,username',
-          access_token: longLivedToken
+          access_token: access_token
         }
       }
     );
 
     const { username } = userResponse.data;
 
-    // Initialize session if it doesn't exist
-    if (!req.session) {
-      req.session = {};
-    }
-
     // Create or update user
-    let user = await User.findById(req.session.userId);
+    let user = await User.findOne({ 'socialAccounts.instagram.username': username });
+    
     if (!user) {
       user = new User({
         email: `${username}@instagram.com`,
         socialAccounts: {
           instagram: { 
-            accessToken: longLivedToken, 
+            accessToken: access_token,
             username 
           }
         }
       });
     } else {
-      user.socialAccounts = {
-        ...user.socialAccounts,
-        instagram: { 
-          accessToken: longLivedToken, 
-          username 
-        }
+      user.socialAccounts.instagram = {
+        accessToken: access_token,
+        username
       };
     }
 
     await user.save();
+
+    // Update session
     req.session.userId = user._id;
 
-    // Force session save
+    // Force session save and wait for completion
     await new Promise((resolve, reject) => {
       req.session.save((err) => {
         if (err) {
           console.error('Session save error:', err);
           reject(err);
         } else {
-          console.log('Session saved:', {
+          console.log('Session saved successfully:', {
             sessionID: req.sessionID,
             userId: user._id
           });
@@ -311,8 +281,6 @@ router.get('/accounts', async (req, res) => {
         twitterUsername = data.username;
       } catch (error) {
         console.error('Twitter verification failed:', error);
-        user.socialAccounts.twitter = null;
-        await user.save();
       }
     }
 
@@ -335,8 +303,6 @@ router.get('/accounts', async (req, res) => {
         instagramUsername = response.data.username;
       } catch (error) {
         console.error('Instagram verification failed:', error);
-        user.socialAccounts.instagram = null;
-        await user.save();
       }
     }
 
@@ -368,8 +334,7 @@ router.get('/status', (req, res) => {
     console.log('Auth status check:', {
       sessionID: req.sessionID,
       userId: req.session?.userId,
-      authenticated: !!req.session?.userId,
-      session: req.session
+      authenticated: !!req.session?.userId
     });
     
     res.json({
