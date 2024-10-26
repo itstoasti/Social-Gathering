@@ -6,11 +6,13 @@ import MongoStore from 'connect-mongo';
 import authRoutes from './routes/auth.js';
 import postRoutes from './routes/posts.js';
 import { connectDB } from './config/db.js';
+import cookieParser from 'cookie-parser';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const isProduction = process.env.NODE_ENV === 'production';
 
 // Initialize server
 const startServer = async () => {
@@ -18,13 +20,16 @@ const startServer = async () => {
     await connectDB();
 
     // Basic middleware
+    app.use(cookieParser(process.env.SESSION_SECRET));
     app.use(express.json({ limit: '50mb' }));
     app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
     // Trust proxy for secure cookies in production
-    app.set('trust proxy', 1);
+    if (isProduction) {
+      app.set('trust proxy', 1);
+    }
 
-    // Configure CORS before session middleware
+    // Configure CORS
     app.use(cors({
       origin: process.env.FRONTEND_URL,
       credentials: true,
@@ -36,9 +41,9 @@ const startServer = async () => {
     // Session store setup
     const mongoStore = MongoStore.create({
       mongoUrl: process.env.MONGODB_URI,
-      ttl: parseInt(process.env.SESSION_TTL, 10) || 86400,
+      ttl: 24 * 60 * 60, // 1 day
       autoRemove: 'native',
-      touchAfter: parseInt(process.env.SESSION_TOUCH_AFTER, 10) || 86400,
+      touchAfter: 24 * 60 * 60, // 1 day
       crypto: {
         secret: process.env.SESSION_SECRET
       },
@@ -47,47 +52,24 @@ const startServer = async () => {
 
     // Session middleware
     app.use(session({
-      name: process.env.SESSION_NAME || 'social.sid',
+      name: 'social.sid',
       secret: process.env.SESSION_SECRET,
       resave: false,
       saveUninitialized: false,
       store: mongoStore,
-      proxy: true,
+      proxy: isProduction,
       cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: isProduction,
         httpOnly: true,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        domain: process.env.NODE_ENV === 'production' ? '.onrender.com' : undefined,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        sameSite: isProduction ? 'none' : 'lax',
+        maxAge: 24 * 60 * 60 * 1000, // 1 day
+        path: '/',
+        domain: isProduction ? '.onrender.com' : undefined
       }
     }));
 
-    // Add security headers
-    app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Credentials', 'true');
-      res.header('Access-Control-Allow-Origin', process.env.FRONTEND_URL);
-      res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Cookie');
-      
-      // Handle preflight requests
-      if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-      }
-      
-      next();
-    });
-
-    // Debug middleware
-    app.use((req, res, next) => {
-      console.log('Request:', {
-        method: req.method,
-        path: req.path,
-        cookies: req.cookies,
-        sessionID: req.sessionID,
-        session: req.session
-      });
-      next();
-    });
+    // Pre-flight OPTIONS handler
+    app.options('*', cors());
 
     // Routes
     app.use('/api/auth', authRoutes);
