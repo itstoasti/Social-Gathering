@@ -21,13 +21,16 @@ const api = axios.create({
   withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
+  },
+  maxRedirects: 5,
+  validateStatus: (status) => {
+    return status >= 200 && status < 500;
   }
 });
 
 // Add request interceptor
 api.interceptors.request.use(
   (config) => {
-    // Log request details
     console.log('API Request:', {
       method: config.method,
       url: config.url,
@@ -65,7 +68,6 @@ api.interceptors.response.use(
       headers: error.response?.headers
     });
 
-    // Handle network errors
     if (!error.response) {
       throw new ApiError(
         'Network Error - Please check your connection',
@@ -74,7 +76,6 @@ api.interceptors.response.use(
       );
     }
 
-    // Handle API errors
     throw new ApiError(
       error.response?.data?.message || error.message,
       error.response?.status,
