@@ -16,6 +16,7 @@ function SocialLogin() {
   });
   const [accounts, setAccounts] = useState<ConnectedAccounts>(initialAccounts);
   const [error, setError] = useState<string | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -32,13 +33,17 @@ function SocialLogin() {
         return;
       }
 
-      if (authStatus === 'success') {
+      const status = await auth.checkAuthStatus();
+      console.debug('Auth status:', status);
+      setIsAuthenticated(status.authenticated);
+
+      if (status.authenticated) {
+        if (authStatus === 'success') {
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
         await fetchConnectedAccounts();
-        window.history.replaceState({}, document.title, window.location.pathname);
-      } else if (authStatus === 'error') {
-        setError('Authentication failed. Please try again.');
       } else {
-        await fetchConnectedAccounts();
+        setAccounts(initialAccounts);
       }
     } catch (err) {
       handleError(err, 'Failed to check authentication status');
@@ -47,17 +52,8 @@ function SocialLogin() {
 
   const fetchConnectedAccounts = async () => {
     try {
-      const authStatus = await auth.checkAuthStatus();
-      console.log('Auth status:', authStatus);
-
-      if (!authStatus.authenticated) {
-        setAccounts(initialAccounts);
-        return;
-      }
-
       const connectedAccounts = await auth.getConnectedAccounts();
-      console.log('Connected accounts:', connectedAccounts);
-      
+      console.debug('Connected accounts:', connectedAccounts);
       setAccounts(connectedAccounts);
       setError(null);
     } catch (err) {
@@ -71,11 +67,9 @@ function SocialLogin() {
       setLoading(prev => ({ ...prev, twitter: true }));
       setError(null);
       
-      console.log('Requesting Twitter auth URL...');
       const { url } = await auth.getTwitterAuthUrl();
       
       if (url) {
-        console.log('Redirecting to Twitter auth URL:', url);
         window.location.href = url;
       } else {
         throw new Error('No authorization URL received');
