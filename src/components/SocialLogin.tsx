@@ -34,7 +34,6 @@ function SocialLogin() {
 
       if (authStatus === 'success') {
         await fetchConnectedAccounts();
-        // Clear URL parameters
         window.history.replaceState({}, document.title, window.location.pathname);
       } else if (authStatus === 'error') {
         setError('Authentication failed. Please try again.');
@@ -48,19 +47,14 @@ function SocialLogin() {
 
   const fetchConnectedAccounts = async () => {
     try {
-      // First check auth status
       const authStatus = await auth.checkAuthStatus();
-      console.log('Auth status:', authStatus);
-
+      
       if (!authStatus.authenticated) {
         setAccounts(initialAccounts);
         return;
       }
 
-      // Then get connected accounts
       const connectedAccounts = await auth.getConnectedAccounts();
-      console.log('Connected accounts:', connectedAccounts);
-      
       setAccounts(connectedAccounts);
       setError(null);
     } catch (err) {
@@ -73,16 +67,7 @@ function SocialLogin() {
     try {
       setLoading(prev => ({ ...prev, twitter: true }));
       setError(null);
-      
-      console.log('Requesting Twitter auth URL...');
-      const { url } = await auth.getTwitterAuthUrl();
-      
-      if (url) {
-        console.log('Redirecting to Twitter auth URL:', url);
-        window.location.href = url;
-      } else {
-        throw new Error('No authorization URL received');
-      }
+      await auth.getTwitterAuthUrl();
     } catch (err) {
       handleError(err, 'Failed to connect to Twitter');
     } finally {
@@ -90,16 +75,23 @@ function SocialLogin() {
     }
   };
 
+  const handleInstagramLogin = async () => {
+    try {
+      setLoading(prev => ({ ...prev, instagram: true }));
+      setError(null);
+      await auth.getInstagramAuthUrl();
+    } catch (err) {
+      handleError(err, 'Failed to connect to Instagram');
+    } finally {
+      setLoading(prev => ({ ...prev, instagram: false }));
+    }
+  };
+
   const handleError = (err: unknown, fallbackMessage: string) => {
     const apiError = err as ApiError;
     const errorMessage = apiError.message || fallbackMessage;
     setError(errorMessage);
-    
-    console.error('Error details:', {
-      message: errorMessage,
-      status: apiError.status,
-      details: apiError.details
-    });
+    console.error('Error:', { message: errorMessage, details: apiError.details });
   };
 
   return (
@@ -127,30 +119,44 @@ function SocialLogin() {
             <span>X.com</span>
           </div>
           <span className={`flex items-center gap-2 ${
-            accounts.twitter.connected ? 'text-green-500' : 'text-red-500'
+            accounts.twitter.connected ? 'text-green-500' : 'text-blue-500'
           }`}>
             {loading.twitter ? (
               <>
-                <span className="animate-spin rounded-full h-4 w-4 border-2 border-gray-500 border-t-transparent" />
+                <span className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" />
                 Connecting...
               </>
             ) : accounts.twitter.connected ? (
               `@${accounts.twitter.username}`
             ) : (
-              'Not Connected'
+              'Connect'
             )}
           </span>
         </button>
         
         <button
-          disabled
-          className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg opacity-50 cursor-not-allowed"
+          onClick={handleInstagramLogin}
+          disabled={loading.instagram}
+          className="w-full flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <div className="flex items-center gap-3">
             <Instagram className="w-5 h-5" />
             <span>Instagram</span>
           </div>
-          <span className="text-gray-500">Coming Soon</span>
+          <span className={`flex items-center gap-2 ${
+            accounts.instagram.connected ? 'text-green-500' : 'text-blue-500'
+          }`}>
+            {loading.instagram ? (
+              <>
+                <span className="animate-spin rounded-full h-4 w-4 border-2 border-current border-t-transparent" />
+                Connecting...
+              </>
+            ) : accounts.instagram.connected ? (
+              `@${accounts.instagram.username}`
+            ) : (
+              'Connect'
+            )}
+          </span>
         </button>
         
         <button
