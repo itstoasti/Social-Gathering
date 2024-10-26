@@ -1,5 +1,5 @@
 import express from 'express';
-import { asyncHandler } from '../middleware/asyncHandler.js';
+import { asyncHandler } from '../middleware/index.js';
 import User from '../models/User.js';
 import twitterRoutes from './auth/twitter.js';
 
